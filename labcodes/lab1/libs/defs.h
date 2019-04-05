@@ -1,6 +1,9 @@
 #ifndef __LIBS_DEFS_H__
 #define __LIBS_DEFS_H__
 
+#define TRUE 1
+#define FALSE 0
+
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
@@ -55,12 +58,12 @@ typedef size_t ppn_t;
 #define offsetof(type, member)                                      \
     ((size_t)(&((type *)0)->member))
 
-/* *
+/**
  * to_struct - get the struct from a ptr
  * @ptr:    a struct pointer of member
  * @type:   the type of the struct this is embedded in
  * @member: the name of the member within the struct
- * */
+ */
 #define to_struct(ptr, type, member)                               \
     ((type *)((char *)(ptr) - offsetof(type, member)))
 

@@ -22,6 +22,8 @@ static inline uint8_t inb(uint16_t port) __attribute__((always_inline));
 static inline void insl(uint32_t port, void *addr, int cnt) __attribute__((always_inline));
 static inline void outb(uint16_t port, uint8_t data) __attribute__((always_inline));
 static inline void outw(uint16_t port, uint16_t data) __attribute__((always_inline));
+
+// The inline function read_ebp() can tell us the value of current ebp.
 static inline uint32_t read_ebp(void) __attribute__((always_inline));
 
 /* Pseudo-descriptors used for LGDT, LLDT(not used) and LIDT instructions. */

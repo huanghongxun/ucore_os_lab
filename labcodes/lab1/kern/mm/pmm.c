@@ -4,9 +4,11 @@
 #include <memlayout.h>
 #include <pmm.h>
 
-/* *
- * Task State Segment:
+/**
+ * 任务状态段（Task State Segment）:
  *
+ * TSS 结构体可能存储在内存中的任意地址。因此 CPU 提供了一个任务寄存器（Task Register）
+ * 来存放 TSS 结构体的内存地址（段选择子和段内偏移）
  * The TSS may reside anywhere in memory. A special segment register called
  * the Task Register (TR) holds a segment selector that points a valid TSS
  * segment descriptor which resides in the GDT. Therefore, to use a TSS
@@ -15,18 +17,15 @@
  *   - add enough information to the TSS in memory as needed
  *   - load the TR register with a segment selector for that segment
  *
- * There are several fileds in TSS for specifying the new stack pointer when a
- * privilege level change happens. But only the fields SS0 and ESP0 are useful
- * in our os kernel.
- *
  * The field SS0 contains the stack segment selector for CPL = 0, and the ESP0
  * contains the new ESP value for CPL = 0. When an interrupt happens in protected
  * mode, the x86 CPU will look in the TSS for SS0 and ESP0 and load their value
  * into SS and ESP respectively.
- * */
+ * 
+ */
 static struct taskstate ts = {0};
 
-/* *
+/**
  * Global Descriptor Table:
  *
  * The kernel and user segments are identical (except for the DPL). To load
@@ -45,16 +44,15 @@ static struct segdesc gdt[] = {
     [SEG_KDATA] = SEG(STA_W, 0x0, 0xFFFFFFFF, DPL_KERNEL),
     [SEG_UTEXT] = SEG(STA_X | STA_R, 0x0, 0xFFFFFFFF, DPL_USER),
     [SEG_UDATA] = SEG(STA_W, 0x0, 0xFFFFFFFF, DPL_USER),
-    [SEG_TSS]    = SEG_NULL,
+    [SEG_TSS]   = SEG_NULL,
 };
 
 static struct pseudodesc gdt_pd = {
     sizeof(gdt) - 1, (uint32_t)gdt
 };
 
-/* *
- * lgdt - load the global descriptor table register and reset the
- * data/code segement registers for kernel.
+/**
+ * 加载 GDT 寄存器，并为内核初始化数据段寄存器、代码段寄存器
  * */
 static inline void
 lgdt(struct pseudodesc *pd) {
@@ -68,15 +66,15 @@ lgdt(struct pseudodesc *pd) {
     asm volatile ("ljmp %0, $1f\n 1:\n" :: "i" (KERNEL_CS));
 }
 
-/* temporary kernel stack */
+/* 临时的内核堆栈（lab2 中将进行修改） */
 uint8_t stack0[1024];
 
-/* gdt_init - initialize the default GDT and TSS */
+/* 初始化默认的 GDT、TSS */
 static void
 gdt_init(void) {
-    // Setup a TSS so that we can get the right stack when we trap from
-    // user to the kernel. But not safe here, it's only a temporary value,
-    // it will be set to KSTACKTOP in lab2.
+    // 初始化 TSS，允许用户程序进行系统调用。
+    // 这里的实现还不安全，我们将内核态的 esp 设为我们临时的内核堆栈区，
+    // 堆栈段寄存器设置为内核数据区（内核堆栈段区lab2 中将会改成 KSTACKTOP。
     ts.ts_esp0 = (uint32_t)&stack0 + sizeof(stack0);
     ts.ts_ss0 = KERNEL_DS;
 
@@ -84,14 +82,13 @@ gdt_init(void) {
     gdt[SEG_TSS] = SEG16(STS_T32A, (uint32_t)&ts, sizeof(ts), DPL_KERNEL);
     gdt[SEG_TSS].sd_s = 0;
 
-    // reload all segment registers
+    // 重置所有的段寄存器
     lgdt(&gdt_pd);
 
     // load the TSS
     ltr(GD_TSS);
 }
 
-/* pmm_init - initialize the physical memory management */
 void
 pmm_init(void) {
     gdt_init();
