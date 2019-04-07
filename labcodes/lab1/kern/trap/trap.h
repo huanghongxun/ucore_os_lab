@@ -45,8 +45,8 @@
  * processor defined exceptions or interrupt vectors.
  */
 
-#define T_SWITCH_TOU          0x81   // switch to user mode
-#define T_SWITCH_TOK          0x80   // switch to kernel mode
+#define T_SWITCH_TOU           120   // switch to user mode
+#define T_SWITCH_TOK           121   // switch to kernel mode
 
 /**
  * 顺序必须和 pushal 指令的顺序一致
@@ -75,7 +75,7 @@ struct trapframe {
     uint16_t tf_fs;
     uint16_t __fsh;
     uint16_t tf_es;
-    uint16_t __gsh;
+    uint16_t __esh;
     uint16_t tf_ds;
     uint16_t __dsh;
     uint32_t tf_trapno; // 在 vectors.S 中压栈

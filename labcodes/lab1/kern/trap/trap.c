@@ -154,7 +154,6 @@ print_regs(struct pushregs *regs) {
 
 /* 捕获并处理分发陷入帧 */
 static void trap_dispatch(struct trapframe *tf) {
-    static struct trapframe tou, tok;
     char c;
 
     switch (tf->tf_trapno) {

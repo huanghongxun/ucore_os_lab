@@ -33,7 +33,7 @@ __alltraps:
     # return falls through to trapret...
 .globl __trapret
 __trapret:
-    # 恢复现场
+    # 将寄存器从 tf 中恢复出来（tf 可能会被 trap 函数修改）
     popal
 
     # 恢复段寄存器值

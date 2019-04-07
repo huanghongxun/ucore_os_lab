@@ -26,7 +26,9 @@ start:
     #  For backwards compatibility with the earliest PCs, physical
     #  address line 20 is tied low, so that addresses higher than
     #  1MB wrap around to zero by default. This code undoes this.
-seta20.1:
+    # A20地址线由键盘控制器 8042 进行控制
+    # 将P21引脚置1的操作：查手册知，首先要先向64h发送0xd1的指令，然后向60h发送0xdf的指令
+seta20.1: # 向 64H 发送 0xD1 指令
     inb $0x64, %al                                  # Wait for not busy(8042 input buffer empty).
     testb $0x2, %al
     jnz seta20.1
@@ -34,7 +36,7 @@ seta20.1:
     movb $0xd1, %al                                 # 0xd1 -> port 0x64
     outb %al, $0x64                                 # 0xd1 means: write data to 8042's P2 port
 
-seta20.2:
+seta20.2: # 向 60H 发送 0xDF 指令
     inb $0x64, %al                                  # Wait for not busy(8042 input buffer empty).
     testb $0x2, %al
     jnz seta20.2

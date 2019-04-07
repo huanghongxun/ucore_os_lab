@@ -7,18 +7,18 @@
 
 /* file header */
 struct elfhdr {
-    uint32_t e_magic;     // must equal ELF_MAGIC
+    uint32_t e_magic;     // 魔数，用于标记该片段为 ELF 头
     uint8_t e_elf[12];
     uint16_t e_type;      // 1=relocatable, 2=executable, 3=shared object, 4=core image
     uint16_t e_machine;   // 3=x86, 4=68K, etc.
     uint32_t e_version;   // file version, always 1
-    uint32_t e_entry;     // entry point if executable
-    uint32_t e_phoff;     // file position of program header or 0
+    uint32_t e_entry;     // 可执行程序的入口函数虚拟内存地址
+    uint32_t e_phoff;     // 程序头表偏移地址
     uint32_t e_shoff;     // file position of section header or 0
     uint32_t e_flags;     // architecture-specific flags, usually 0
-    uint16_t e_ehsize;    // size of this elf header
-    uint16_t e_phentsize; // size of an entry in program header
-    uint16_t e_phnum;     // number of entries in program header or 0
+    uint16_t e_ehsize;    // 该 ELF 头字节数
+    uint16_t e_phentsize; // 程序头表项大小
+    uint16_t e_phnum;     // 程序头表项数
     uint16_t e_shentsize; // size of an entry in section header
     uint16_t e_shnum;     // number of entries in section header or 0
     uint16_t e_shstrndx;  // section number that contains section name strings
