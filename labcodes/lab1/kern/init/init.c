@@ -82,7 +82,9 @@ lab1_print_cur_status(void) {
 
 static void lab1_switch_to_user(void) {
     asm volatile (
-        "int %0\n"
+        "sub $8, %%esp\n"
+        "int %0\n" // 触发系统调用中断，已经在 trap.c/idt_init() 函数中将该中断的权限级设置为用户级
+        "movl %%ebp, %%esp"
         :: "i"(T_SWITCH_TOU)
     );
 }
@@ -90,6 +92,7 @@ static void lab1_switch_to_user(void) {
 static void lab1_switch_to_kernel(void) {
     asm volatile (
         "int %0\n" // 触发系统调用中断，已经在 trap.c/idt_init() 函数中将该中断的权限级设置为用户级
+        "movl %%ebp, %%esp\n"
         :: "i"(T_SWITCH_TOK)
     );
 }

@@ -1,29 +1,37 @@
 #ifndef __KERN_MM_MEMLAYOUT_H__
 #define __KERN_MM_MEMLAYOUT_H__
 
-/* This file contains the definitions for memory management in our OS. */
+/**
+ * 定义操作系统内存布局的一些常量
+ */
 
-/* global segment number */
-#define SEG_KTEXT   1
-#define SEG_KDATA   2
-#define SEG_UTEXT   3
-#define SEG_UDATA   4
-#define SEG_TSS     5
+/* 全局段 (Global Segment) */
 
-/* global descrptor numbers */
-#define GD_KTEXT    ((SEG_KTEXT) << 3)      // kernel text
-#define GD_KDATA    ((SEG_KDATA) << 3)      // kernel data
-#define GD_UTEXT    ((SEG_UTEXT) << 3)      // user text
-#define GD_UDATA    ((SEG_UDATA) << 3)      // user data
-#define GD_TSS      ((SEG_TSS) << 3)        // task segment selector
+#define SEG_KTEXT    1 // 内核代码段
+#define SEG_KDATA    2 // 内核数据段
+#define SEG_UTEXT    3 // 用户代码段
+#define SEG_UDATA    4 // 用户数据段
+#define SEG_TSS      5 // 任务选择段（TSS）
 
-#define DPL_KERNEL  (0)
-#define DPL_USER    (3)
+/* 全局描述符编号 (Global Descriptor)，低三位 */
 
-#define KERNEL_CS   ((GD_KTEXT) | DPL_KERNEL)
-#define KERNEL_DS   ((GD_KDATA) | DPL_KERNEL)
-#define USER_CS     ((GD_UTEXT) | DPL_USER)
-#define USER_DS     ((GD_UDATA) | DPL_USER)
+#define GD_KTEXT    ((SEG_KTEXT) << 3) // 内核代码段描述符编号
+#define GD_KDATA    ((SEG_KDATA) << 3) // 内核数据段描述符编号
+#define GD_UTEXT    ((SEG_UTEXT) << 3) // 用户代码段描述符编号
+#define GD_UDATA    ((SEG_UDATA) << 3) // 用户数据段描述符编号
+#define GD_TSS      ((SEG_TSS  ) << 3) // 任务状态段描述符编号
+
+/* 权限级别 (Descriptor Privilege Level) */
+
+#define DPL_KERNEL  (0)  // 内核权限级
+#define DPL_USER    (3)  // 用户权限级
+
+/* 代码段描述符 */
+
+#define KERNEL_CS    ((GD_KTEXT) | DPL_KERNEL) // 内核代码段描述符
+#define KERNEL_DS    ((GD_KDATA) | DPL_KERNEL) // 内核数据段描述符
+#define USER_CS      ((GD_UTEXT) | DPL_USER  ) // 用户代码段描述符
+#define USER_DS      ((GD_UDATA) | DPL_USER  ) // 用户数据段描述符
 
 /* *
  * Virtual memory map:                                          Permissions
@@ -57,12 +65,12 @@
 #define KMEMSIZE            0x38000000                  // the maximum amount of physical memory
 #define KERNTOP             (KERNBASE + KMEMSIZE)
 
-/* *
+/**
  * Virtual page table. Entry PDX[VPT] in the PD (Page Directory) contains
  * a pointer to the page directory itself, thereby turning the PD into a page
  * table, which maps all the PTEs (Page Table Entry) containing the page mappings
  * for the entire virtual address space into that 4 Meg region starting at VPT.
- * */
+ */
 #define VPT                 0xFAC00000
 
 #define KSTACKPAGE          2                           // # of pages in kernel stack
@@ -91,11 +99,11 @@ struct e820map {
     } __attribute__((packed)) map[E820MAX];
 };
 
-/* *
- * struct Page - Page descriptor structures. Each Page describes one
- * physical page. In kern/mm/pmm.h, you can find lots of useful functions
- * that convert Page to other data types, such as phyical address.
- * */
+/**
+ * 页描述符。每个页描述一个物理页。
+ * 
+ * 在 kern/mm/pmm.h 中包含了很多页管理的工具函数。
+ */
 struct Page {
     int ref;                        // page frame's reference counter
     uint32_t flags;                 // array of flags that describe the status of the page frame
@@ -118,7 +126,7 @@ struct Page {
 #define le2page(le, member)                 \
     to_struct((le), struct Page, member)
 
-/* free_area_t - maintains a doubly linked list to record free (unused) pages */
+/* 维护记录空闲页的双向链表 */
 typedef struct {
     list_entry_t free_list;         // the list header
     unsigned int nr_free;           // # of free pages in this free list

@@ -13,8 +13,7 @@
 static uint16_t irq_mask = 0xFFFF & ~(1 << IRQ_SLAVE);
 static bool did_init = 0;
 
-static void
-pic_setmask(uint16_t mask) {
+static void pic_setmask(uint16_t mask) {
     irq_mask = mask;
     if (did_init) {
         outb(IO_PIC1 + 1, mask);
@@ -22,14 +21,11 @@ pic_setmask(uint16_t mask) {
     }
 }
 
-void
-pic_enable(unsigned int irq) {
+void pic_enable(unsigned int irq) {
     pic_setmask(irq_mask & ~(1 << irq));
 }
 
-/* pic_init - initialize the 8259A interrupt controllers */
-void
-pic_init(void) {
+void pic_init(void) {
     did_init = 1;
 
     // mask all interrupts

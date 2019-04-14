@@ -195,7 +195,7 @@ struct taskstate {
     // 如果我们将 ts_iomb 设置超过了 TSS 段界限（段寄存器的长度限制），表示我们不使用 io_bitmap
     // io_bitmap 以 0xFF 结尾，因此其长度 = 实际长度+1，且这个 0xFF 终止符需要在 TSS 段界限之内
     // CPU 最多能访问 65536 个端口，因此 io_bitmap 大小需要为 65536 字节 (8KB)
-};
+} __attribute__((packed));
 
 #endif /* !__KERN_MM_MMU_H__ */
 

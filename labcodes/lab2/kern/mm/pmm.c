@@ -9,43 +9,41 @@
 #include <sync.h>
 #include <error.h>
 
-/* *
- * Task State Segment:
+/**
+ * 任务状态段（Task State Segment）:
  *
- * The TSS may reside anywhere in memory. A special segment register called
- * the Task Register (TR) holds a segment selector that points a valid TSS
- * segment descriptor which resides in the GDT. Therefore, to use a TSS
- * the following must be done in function gdt_init:
- *   - create a TSS descriptor entry in GDT
- *   - add enough information to the TSS in memory as needed
- *   - load the TR register with a segment selector for that segment
+ * TSS 在内存中的位置不定（因此这里就直接定义了 ts 而没有规定其地址。
+ * 会有一个任务寄存器 (TR) 来记录 TSS 结构体的位置（段选择子，因此具体位置在 GDT 中）。
+ * gdt_init 函数需要：
+ *   1. 在 GDT 中创建 TSS 段描述符
+ *   2. 在内存中创建 TSS 结构体并进行初始化
+ *   3. 设置 TR 寄存器
  *
- * There are several fileds in TSS for specifying the new stack pointer when a
- * privilege level change happens. But only the fields SS0 and ESP0 are useful
- * in our os kernel.
+ * TSS 中的一些属性存储切换到新特权级时的堆栈指针值。但是本内核只使用内核态（CPL=0）和用户态
+ * （CPL=3）。因此只使用 SS0 和 ESP0。
  *
- * The field SS0 contains the stack segment selector for CPL = 0, and the ESP0
- * contains the new ESP value for CPL = 0. When an interrupt happens in protected
- * mode, the x86 CPU will look in the TSS for SS0 and ESP0 and load their value
- * into SS and ESP respectively.
- * */
+ * TSS.SS0 存储当前特权级 CPL=0 时的堆栈段寄存器值，ESP0 包含 CPL=0 时的堆栈指针寄存器的值。
+ * 在保护模式下，如果发生中断，x86 CPU 将会从 TSS.{SS0,ESP0} 加载对应值到寄存器中（因为中断
+ * 导致跳转到内核态，内核态的特权级为 0），并将旧值
+ * 载入堆栈。
+ */
 static struct taskstate ts = {0};
 
-// virtual address of physicall page array
 struct Page *pages;
-// amount of physical memory (in pages)
 size_t npage = 0;
 
-// virtual address of boot-time page directory
+/**
+ * 启动时期的页表
+ * 在 entry.S 中定义。
+ */
 extern pde_t __boot_pgdir;
 pde_t *boot_pgdir = &__boot_pgdir;
 // physical address of boot-time page directory
 uintptr_t boot_cr3;
 
-// physical memory management
 const struct pmm_manager *pmm_manager;
 
-/* *
+/**
  * The page directory entry corresponding to the virtual address range
  * [VPT, VPT + PTSIZE) points to the page directory itself. Thus, the page
  * directory is treated as a page table as well as a page directory.
@@ -61,9 +59,10 @@ const struct pmm_manager *pmm_manager;
 pte_t * const vpt = (pte_t *)VPT;
 pde_t * const vpd = (pde_t *)PGADDR(PDX(VPT), PDX(VPT), 0);
 
-/* *
- * Global Descriptor Table:
+/**
+ * 全局描述符表（Global Descriptor Table）:
  *
+ * 
  * The kernel and user segments are identical (except for the DPL). To load
  * the %ss register, the CPL must equal the DPL. Thus, we must duplicate the
  * segments for the user and the kernel. Defined as follows:
@@ -91,10 +90,9 @@ static void check_alloc_page(void);
 static void check_pgdir(void);
 static void check_boot_pgdir(void);
 
-/* *
- * lgdt - load the global descriptor table register and reset the
- * data/code segement registers for kernel.
- * */
+/**
+ * 加载 GDT 寄存器，并为内核初始化数据段寄存器、代码段寄存器
+ */
 static inline void
 lgdt(struct pseudodesc *pd) {
     asm volatile ("lgdt (%0)" :: "r" (pd));
@@ -107,34 +105,28 @@ lgdt(struct pseudodesc *pd) {
     asm volatile ("ljmp %0, $1f\n 1:\n" :: "i" (KERNEL_CS));
 }
 
-/* *
- * load_esp0 - change the ESP0 in default task state segment,
- * so that we can use different kernel stack when we trap frame
- * user to kernel.
- * */
-void
-load_esp0(uintptr_t esp0) {
+void load_esp0(uintptr_t esp0) {
     ts.ts_esp0 = esp0;
 }
 
-/* gdt_init - initialize the default GDT and TSS */
-static void
-gdt_init(void) {
-    // set boot kernel stack and default SS0
+/* 初始化默认的 GDT、TSS */
+static void gdt_init(void) {
+    // 初始化 TSS，允许用户程序进行系统调用。
+    // 设置启动内核栈，和默认的 SS0
     load_esp0((uintptr_t)bootstacktop);
     ts.ts_ss0 = KERNEL_DS;
 
     // initialize the TSS filed of the gdt
     gdt[SEG_TSS] = SEGTSS(STS_T32A, (uintptr_t)&ts, sizeof(ts), DPL_KERNEL);
 
-    // reload all segment registers
+    // 重置所有的段寄存器
     lgdt(&gdt_pd);
 
     // load the TSS
     ltr(GD_TSS);
 }
 
-//init_pmm_manager - initialize a pmm_manager instance
+// initialize a pmm_manager instance
 static void
 init_pmm_manager(void) {
     pmm_manager = &default_pmm_manager;
@@ -142,13 +134,13 @@ init_pmm_manager(void) {
     pmm_manager->init();
 }
 
-//init_memmap - call pmm->init_memmap to build Page struct for free memory  
+// call pmm->init_memmap to build Page struct for free memory  
 static void
 init_memmap(struct Page *base, size_t n) {
     pmm_manager->init_memmap(base, n);
 }
 
-//alloc_pages - call pmm->alloc_pages to allocate a continuous n*PAGESIZE memory 
+// call pmm->alloc_pages to allocate a continuous n*PAGESIZE memory 
 struct Page *
 alloc_pages(size_t n) {
     struct Page *page=NULL;
@@ -270,10 +262,7 @@ boot_alloc_page(void) {
     return page2kva(p);
 }
 
-//pmm_init - setup a pmm to manage physical memory, build PDT&PT to setup paging mechanism 
-//         - check the correctness of pmm & paging mechanism, print PDT&PT
-void
-pmm_init(void) {
+void pmm_init(void) {
     // We've already enabled paging
     boot_cr3 = PADDR(boot_pgdir);
 
@@ -317,15 +306,7 @@ pmm_init(void) {
 
 }
 
-//get_pte - get pte and return the kernel virtual address of this pte for la
-//        - if the PT contians this pte didn't exist, alloc a page for PT
-// parameter:
-//  pgdir:  the kernel virtual base address of PDT
-//  la:     the linear address need to map
-//  create: a logical value to decide if alloc a page for PT
-// return vaule: the kernel virtual address of this pte
-pte_t *
-get_pte(pde_t *pgdir, uintptr_t la, bool create) {
+pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     /* LAB2 EXERCISE 2: YOUR CODE
      *
      * If you need to visit a physical address, please use KADDR()
@@ -347,8 +328,8 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
      *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
      *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
      */
-#if 0
-    pde_t *pdep = NULL;   // (1) find page directory entry
+
+    pde_t *pdep = &pgdir[PDX(la)];   // (1) find page directory entry
     if (0) {              // (2) check if entry is not present
                           // (3) check if creating is needed, then alloc page for page table
                           // CAUTION: this page is used for page table, not for common data page
@@ -358,10 +339,9 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
                           // (7) set page directory entry's permission
     }
     return NULL;          // (8) return page table entry
-#endif
+
 }
 
-//get_page - get related Page struct for linear address la using PDT pgdir
 struct Page *
 get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
     pte_t *ptep = get_pte(pgdir, la, 0);
@@ -374,7 +354,7 @@ get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
     return NULL;
 }
 
-//page_remove_pte - free an Page sturct which is related linear address la
+// page_remove_pte - free an Page sturct which is related linear address la
 //                - and clean(invalidate) pte which is related linear address la
 //note: PT is changed, so the TLB need to be invalidate 
 static inline void
@@ -415,16 +395,7 @@ page_remove(pde_t *pgdir, uintptr_t la) {
     }
 }
 
-//page_insert - build the map of phy addr of an Page with the linear addr la
-// paramemters:
-//  pgdir: the kernel virtual base address of PDT
-//  page:  the Page which need to map
-//  la:    the linear address need to map
-//  perm:  the permission of this Page which is setted in related pte
-// return value: always 0
-//note: PT is changed, so the TLB need to be invalidate 
-int
-page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
+int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     pte_t *ptep = get_pte(pgdir, la, 1);
     if (ptep == NULL) {
         return -E_NO_MEM;
@@ -444,10 +415,7 @@ page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     return 0;
 }
 
-// invalidate a TLB entry, but only if the page tables being
-// edited are the ones currently in use by the processor.
-void
-tlb_invalidate(pde_t *pgdir, uintptr_t la) {
+void tlb_invalidate(pde_t *pgdir, uintptr_t la) {
     if (rcr3() == PADDR(pgdir)) {
         invlpg((void *)la);
     }

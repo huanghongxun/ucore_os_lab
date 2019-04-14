@@ -7,21 +7,20 @@
 /**
  * 任务状态段（Task State Segment）:
  *
- * TSS 结构体可能存储在内存中的任意地址。因此 CPU 提供了一个任务寄存器（Task Register）
- * 来存放 TSS 结构体的内存地址（段选择子和段内偏移）
- * The TSS may reside anywhere in memory. A special segment register called
- * the Task Register (TR) holds a segment selector that points a valid TSS
- * segment descriptor which resides in the GDT. Therefore, to use a TSS
- * the following must be done in function gdt_init:
- *   - create a TSS descriptor entry in GDT
- *   - add enough information to the TSS in memory as needed
- *   - load the TR register with a segment selector for that segment
+ * TSS 在内存中的位置不定（因此这里就直接定义了 ts 而没有规定其地址。
+ * 会有一个任务寄存器 (TR) 来记录 TSS 结构体的位置（段选择子，因此具体位置在 GDT 中）。
+ * gdt_init 函数需要：
+ *   1. 在 GDT 中创建 TSS 段描述符
+ *   2. 在内存中创建 TSS 结构体并进行初始化
+ *   3. 设置 TR 寄存器
  *
- * The field SS0 contains the stack segment selector for CPL = 0, and the ESP0
- * contains the new ESP value for CPL = 0. When an interrupt happens in protected
- * mode, the x86 CPU will look in the TSS for SS0 and ESP0 and load their value
- * into SS and ESP respectively.
- * 
+ * TSS 中的一些属性存储切换到新特权级时的堆栈指针值。但是本内核只使用内核态（CPL=0）和用户态
+ * （CPL=3）。因此只使用 SS0 和 ESP0。
+ *
+ * TSS.SS0 存储当前特权级 CPL=0 时的堆栈段寄存器值，ESP0 包含 CPL=0 时的堆栈指针寄存器的值。
+ * 在保护模式下，如果发生中断，x86 CPU 将会从 TSS.{SS0,ESP0} 加载对应值到寄存器中（因为中断
+ * 导致跳转到内核态，内核态的特权级为 0），并将旧值
+ * 载入堆栈。
  */
 static struct taskstate ts = {0};
 

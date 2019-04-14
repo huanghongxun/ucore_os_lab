@@ -3,7 +3,7 @@
 
 #include <defs.h>
 
-/* *
+/**
  * STABS debugging info
  *
  * The kernel debugger can understand some debugging information in

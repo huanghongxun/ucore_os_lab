@@ -10,6 +10,9 @@
 // pmm_manager is a physical memory management class. A special pmm manager - XXX_pmm_manager
 // only needs to implement the methods in pmm_manager class, then XXX_pmm_manager can be used
 // by ucore to manage the total physical memory space.
+/**
+ * 物理内存管理类，
+ */
 struct pmm_manager {
     const char *name;                                 // XXX_pmm_manager's name
     void (*init)(void);                               // initialize internal description&management data structure
@@ -22,10 +25,13 @@ struct pmm_manager {
     void (*check)(void);                              // check the correctness of XXX_pmm_manager 
 };
 
+// 物理内存管理器
 extern const struct pmm_manager *pmm_manager;
 extern pde_t *boot_pgdir;
 extern uintptr_t boot_cr3;
 
+// 初始化物理内存管理器。 setup a pmm to manage physical memory, build PDT&PT to setup paging mechanism 
+//         - check the correctness of pmm & paging mechanism, print PDT&PT
 void pmm_init(void);
 
 struct Page *alloc_pages(size_t n);
@@ -35,12 +41,47 @@ size_t nr_free_pages(void);
 #define alloc_page() alloc_pages(1)
 #define free_page(page) free_pages(page, 1)
 
+/**
+ * 根据线性地址以及页表获取页表项（指针指向其内核虚拟地址）
+ * @param pgdir 内核页表的地址
+ * @param la 需要转换为物理地址的线性地址
+ * @param create 是否需要分配新的物理页
+ * @return 页表项的内核虚拟地址
+ */
 pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create);
+
+// get_page - get related Page struct for linear address la using PDT pgdir
 struct Page *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store);
 void page_remove(pde_t *pgdir, uintptr_t la);
+
+//page_insert - build the map of phy addr of an Page with the linear addr la
+// paramemters:
+//  pgdir: the kernel virtual base address of PDT
+//  page:  the Page which need to map
+//  la:    the linear address need to map
+//  perm:  the permission of this Page which is setted in related pte
+// return value: always 0
+//note: PT is changed, so the TLB need to be invalidate 
+/**
+ * 
+ * 该函数会修改页表，因此需要更新 TLB。
+ * 
+ * @param pgdir 
+ * @param page 需要映射的页
+ * @param la 需要映射的虚拟地址
+ * @param perm 页权限
+ * @return 0
+ */
 int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm);
 
+/**
+ * 修改当前的 TSS 中的 esp0。允许我们从内核调到内核态时使用不同的内核栈。
+ */
 void load_esp0(uintptr_t esp0);
+
+/**
+ * 标记刷新 TLB 项。仅标记刷新当前正在使用的页表项
+ */
 void tlb_invalidate(pde_t *pgdir, uintptr_t la);
 
 void print_pgdir(void);
@@ -58,10 +99,10 @@ void print_pgdir(void);
             __m_kva - KERNBASE;                                         \
         })
 
-/* *
+/**
  * KADDR - takes a physical address and returns the corresponding kernel virtual
  * address. It panics if you pass an invalid physical address.
- * */
+ */
 #define KADDR(pa) ({                                                    \
             uintptr_t __m_pa = (pa);                                    \
             size_t __m_ppn = PPN(__m_pa);                               \
@@ -71,7 +112,9 @@ void print_pgdir(void);
             (void *) (__m_pa + KERNBASE);                               \
         })
 
+// 物理内存页数组（指针指向虚拟内存地址）
 extern struct Page *pages;
+// 物理内存页数
 extern size_t npage;
 
 static inline ppn_t
