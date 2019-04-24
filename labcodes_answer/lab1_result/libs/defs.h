@@ -51,15 +51,23 @@ typedef size_t ppn_t;
             (typeof(a))(ROUNDDOWN((size_t)(a) + __n - 1, __n));     \
         })
 
-/* Return the offset of 'member' relative to the beginning of a struct type */
+/* 返回 type->member 的相对（结构体）地址 */
 #define offsetof(type, member)                                      \
     ((size_t)(&((type *)0)->member))
 
-/* *
- * to_struct - get the struct from a ptr
- * @ptr:    a struct pointer of member
- * @type:   the type of the struct this is embedded in
- * @member: the name of the member within the struct
+/**
+ * 根据 list_entry 的地址计算所属结构体的地址。
+ * 比如：
+ * struct link_node {
+ *     int a, b;
+ *     list_entry_t list;
+ * };
+ * 我们现在已知 link_node->list 的地址，根据 link_node 的定义
+ * 来计算 link_node 的地址，就应该是 &list - 8（因为 int a, b
+ * 占用了 8 个字节的内存空间）
+ * @param ptr list_entry 的地址
+ * @param type 所属结构体的类型
+ * @param member list_entry 在所属结构体内的命名
  * */
 #define to_struct(ptr, type, member)                               \
     ((type *)((char *)(ptr) - offsetof(type, member)))

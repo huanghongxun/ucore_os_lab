@@ -50,9 +50,12 @@ seta20.2:
 # 由于 BIOS 中断调用必须在实模式下完成，因此由 bootloader 完成该任务比较方便。
 # 0x15 号 BIOS 中断将内存布局通过系统内存映射地址描述符（Address Range Descriptor）的
 # 形式返回给调用者。
-
+# 在 0x8000 地址处保存了从 BIOS 中获得的内存分布信息，此信息按照 struct e820map 的设
+# 置来进行填充。这部分信息将在 bootloader 启动 ucore 后，由 ucore 的 page_init 函数来
+# 根据 struct e820map 的 memmap（定义了起始地址为 0x8000）来完成对整个机器中的物理内存
+# 的总体管理。
 probe_memory:
-    movl $0, 0x8000                                 # 0x8000: 该内存地址用于记录已读取的 ARD 的字节数
+    movl $0, 0x8000                                 # 0x8000: 该内存地址用于记录已读取的 ARD 的字节数（e820map.nr_map）
     xorl %ebx, %ebx                                 # %ebx: 如果是第一次调用或内存区域扫描完毕，则为 0；否则存放上次调用之后的计数值
     movw $0x8004, %di                               # %edi: 指向保存 ARD 结构的缓冲区，BIOS 从这里开始写入信息
 start_probe:
@@ -64,8 +67,8 @@ start_probe:
     movw $12345, 0x8000                             # 否则将 0x8000 设为特殊值
     jmp finish_probe
 cont:
-    addw $20, %di
-    incl 0x8000                                     # 记录已读取的 ARD 个数
+    addw $20, %di                                   # 设置下一个BIOS返回的映射地址描述符的起始地址
+    incl 0x8000                                     # 记录已读取的 ARD 个数（e820map.nr_map）
     cmpl $0, %ebx                                   # %ebx: 中断返回后保存下一个 ARD 的计数地址
     jnz start_probe                                 # 如果不存在下一个 ARD 的计数地址，则表示已经读取完成
 finish_probe:

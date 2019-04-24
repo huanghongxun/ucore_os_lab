@@ -98,10 +98,16 @@ void bootmain(void) {
         // 由于编译后各个段（代码、常量）地址都已经被固定，因此我们从 ph 中读取出代码段的地址。
         // 由于 p_offset 是相对于文件头的偏移值（相对于 elf 本身），ELF 本身存放在 1 号扇区中，
         // 因此 ph->p_offset 就是该程序段的磁盘地址，一次性将操作系统的数据读到对应的内存中。
+        //
+        // & 0xFFFFFF 的目的是限制内核代码段在物理地址 0x00?????? 内，在 memlayout.h 中，定
+        // 义了页表，将虚拟地址 0xC0?????? 直接映射到 0x00?????? 的物理地址，也就是内核的代码
+        // 的虚拟地址都是 0xC0???????（这个也在 kernel.ld 中予以定义）。
+        // 而 p_va 的地址是在 kernel.ld 中定义的，ELF 文件头由 ld 生成。
         readseg(ph->p_va & 0xFFFFFF, ph->p_memsz, ph->p_offset);
     }
 
     // 从 ELF 头中读取出操作系统入口函数地址并予以调用，将 CPU 控制权转交给操作系统
+    // e_entry 由 kernel.ld 规定
     // 这个函数将执行到操作系统关闭或故障
     ((void (*)(void))(ELFHDR->e_entry & 0xFFFFFF))();
 

@@ -14,15 +14,13 @@
  * 物理内存管理类，
  */
 struct pmm_manager {
-    const char *name;                                 // XXX_pmm_manager's name
-    void (*init)(void);                               // initialize internal description&management data structure
-                                                      // (free block list, number of free block) of XXX_pmm_manager 
-    void (*init_memmap)(struct Page *base, size_t n); // setup description&management data structcure according to
-                                                      // the initial free physical memory space 
-    struct Page *(*alloc_pages)(size_t n);            // allocate >=n pages, depend on the allocation algorithm 
-    void (*free_pages)(struct Page *base, size_t n);  // free >=n pages with "base" addr of Page descriptor structures(memlayout.h)
-    size_t (*nr_free_pages)(void);                    // return the number of free pages 
-    void (*check)(void);                              // check the correctness of XXX_pmm_manager 
+    const char *name;                                 // 物理内存页管理器的名字
+    void (*init)(void);                               // 初始化内存管理器
+    void (*init_memmap)(struct Page *base, size_t n); // 初始化管理空闲内存页的数据结构
+    struct Page *(*alloc_pages)(size_t n);            // 分配 n 个物理内存页
+    void (*free_pages)(struct Page *base, size_t n);  // 释放 n 个物理内存页
+    size_t (*nr_free_pages)(void);                    // 返回当前剩余的空闲页数 
+    void (*check)(void);                              // 用于检测分配/释放实现是否正确的辅助函数 
 };
 
 // 物理内存管理器
@@ -42,10 +40,10 @@ size_t nr_free_pages(void);
 #define free_page(page) free_pages(page, 1)
 
 /**
- * 根据线性地址以及页表获取页表项（指针指向其内核虚拟地址）
- * @param pgdir 内核页表的地址
- * @param la 需要转换为物理地址的线性地址
- * @param create 是否需要分配新的物理页
+ * 根据线性地址以及页表获取页表项
+ * @param pgdir 内核页表的地址（内核虚地址）
+ * @param la 需要查找所在页的线性地址
+ * @param create 是否需要分配新的页给二级页表
  * @return 页表项的内核虚拟地址
  */
 pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create);
@@ -86,11 +84,9 @@ void tlb_invalidate(pde_t *pgdir, uintptr_t la);
 
 void print_pgdir(void);
 
-/* *
- * PADDR - takes a kernel virtual address (an address that points above KERNBASE),
- * where the machine's maximum 256MB of physical memory is mapped and returns the
- * corresponding physical address.  It panics if you pass it a non-kernel virtual address.
- * */
+/**
+ * 将内核虚拟地址 (+KERNBASE) 转换为物理地址
+ */
 #define PADDR(kva) ({                                                   \
             uintptr_t __m_kva = (uintptr_t)(kva);                       \
             if (__m_kva < KERNBASE) {                                   \
@@ -100,8 +96,7 @@ void print_pgdir(void);
         })
 
 /**
- * KADDR - takes a physical address and returns the corresponding kernel virtual
- * address. It panics if you pass an invalid physical address.
+ * 将物理地址转换为内核虚拟地址 (+KERNBASE)
  */
 #define KADDR(pa) ({                                                    \
             uintptr_t __m_pa = (pa);                                    \
@@ -112,21 +107,31 @@ void print_pgdir(void);
             (void *) (__m_pa + KERNBASE);                               \
         })
 
-// 物理内存页数组（指针指向虚拟内存地址）
+// 物理内存页数组（虚拟地址）
 extern struct Page *pages;
 // 物理内存页数
 extern size_t npage;
 
+/**
+ * 返回页面的页面号。
+ * 由于内核页表是按顺序存放页面的，因此页面下标就是页面号。
+ */
 static inline ppn_t
 page2ppn(struct Page *page) {
     return page - pages;
 }
 
+/**
+ * 返回页面的物理内存首地址。
+ */
 static inline uintptr_t
 page2pa(struct Page *page) {
     return page2ppn(page) << PGSHIFT;
 }
 
+/**
+ * 返回物理地址所在的页面的结构体
+ */
 static inline struct Page *
 pa2page(uintptr_t pa) {
     if (PPN(pa) >= npage) {

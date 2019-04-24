@@ -74,6 +74,9 @@ struct gatedesc {
     unsigned gd_off_31_16 : 16;     // high bits of offset in segment
 };
 
+#define GATE_TRAP 1
+#define GATE_INT 0
+
 /**
  * @brief 初始化中断/陷阱门描述符
  * @param istrap 0 表示中断门，1 表示陷阱（异常）门
@@ -208,12 +211,12 @@ struct taskstate {
 
 // A linear address 'la' has a three-part structure as follows:
 //
-// +--------10------+-------10-------+---------12----------+
+// +-------10-------+-------10-------+---------12----------+
 // | Page Directory |   Page Table   | Offset within Page  |
 // |      Index     |     Index      |                     |
 // +----------------+----------------+---------------------+
 //  \--- PDX(la) --/ \--- PTX(la) --/ \---- PGOFF(la) ----/
-//  \----------- PPN(la) -----------/
+//   \---------- PPN(la) ----------/
 //
 // The PDX, PTX, PGOFF, and PPN macros decompose linear addresses as shown.
 // To construct a linear address la from PDX(la), PTX(la), and PGOFF(la),
