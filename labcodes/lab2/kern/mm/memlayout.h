@@ -191,7 +191,7 @@ struct Page {
  * 其中的链表指针指向了空闲的页帧。
  */
 typedef struct {
-    list_entry_t free_list;         // 空闲块双向链表的头
+    list_entry_t free_list;         // 空闲块双向链表的虚拟头节点
     unsigned int nr_free;           // 空闲块的总数（以页为单位）
 } free_area_t;
 

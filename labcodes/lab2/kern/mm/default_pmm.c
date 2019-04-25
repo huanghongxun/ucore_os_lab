@@ -49,7 +49,7 @@ default_init_memmap(struct Page *base, size_t n) {
     // base 页为该连续空闲页面的头页面
     base->property = n;
     SetPageProperty(base); // 将 base 标记为头页面
-    nr_free += n;
+    nr_free += n; // 维护空闲页帧数
     list_add_before(&free_list, &(base->page_link));
 }
 
