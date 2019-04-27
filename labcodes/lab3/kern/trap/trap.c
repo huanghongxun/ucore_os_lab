@@ -33,23 +33,41 @@ static struct pseudodesc idt_pd = {
     sizeof(idt) - 1, (uintptr_t)idt
 };
 
-/* idt_init - initialize IDT to each of the entry points in kern/trap/vectors.S */
 void
 idt_init(void) {
-     /* LAB1 YOUR CODE : STEP 2 */
-     /* (1) Where are the entry addrs of each Interrupt Service Routine (ISR)?
-      *     All ISR's entry addrs are stored in __vectors. where is uintptr_t __vectors[] ?
-      *     __vectors[] is in kern/trap/vector.S which is produced by tools/vector.c
-      *     (try "make" command in lab1, then you will find vector.S in kern/trap DIR)
-      *     You can use  "extern uintptr_t __vectors[];" to define this extern variable which will be used later.
-      * (2) Now you should setup the entries of ISR in Interrupt Description Table (IDT).
-      *     Can you see idt[256] in this file? Yes, it's IDT! you can use SETGATE macro to setup each item of IDT
-      * (3) After setup the contents of IDT, you will let CPU know where is the IDT by using 'lidt' instruction.
-      *     You don't know the meaning of this instruction? just google it! and check the libs/x86.h to know more.
-      *     Notice: the argument of lidt is idt_pd. try to find it!
-      */
+    // LAB1 YOUR CODE : STEP 2
+    // (1) Where are the entry addrs of each Interrupt Service Routine (ISR)?
+    //     All ISR's entry addrs are stored in __vectors. where is uintptr_t __vectors[] ?
+    //     __vectors[] is in kern/trap/vector.S which is produced by tools/vector.c
+    //     (try "make" command in lab1, then you will find vector.S in kern/trap DIR)
+    //     You can use  "extern uintptr_t __vectors[];" to define this extern variable which will be used later.
+
+    // 表示各个中断处理程序的段内偏移地址
+    extern uintptr_t __vectors[]; // defined in kern/trap/vector.S
+
+    // (2) Now you should setup the entries of ISR in Interrupt Description Table (IDT).
+    //     Can you see idt[256] in this file? Yes, it's IDT! you can use SETGATE macro to setup each item of IDT
+
+    int i;
+    for (i = 0; i < IDT_SIZE; ++i) {
+        // 中断处理程序在内核代码段中，特权级为内核级
+        SETGATE(idt[i], GATE_INT, GD_KTEXT, __vectors[i], DPL_KERNEL);
+    }
+
+    // 系统调用中断（陷入中断）的特权级为用户态
+    SETGATE(idt[T_SWITCH_TOK], GATE_INT, GD_KTEXT, __vectors[T_SWITCH_TOK], DPL_USER);
+
+    // (3) After setup the contents of IDT, you will let CPU know where is the IDT by using 'lidt' instruction.
+    //     You don't know the meaning of this instruction? just google it! and check the libs/x86.h to know more.
+    //     Notice: the argument of lidt is idt_pd. try to find it
+
+    lidt(&idt_pd);
 }
 
+/**
+ * Find trap display name of trap number.
+ * @return trap name if it is software trap; "Hardware Interrupt" if it is hardware interrupt; "(unknown interrupt)" otherwise.
+ */
 static const char *
 trapname(int trapno) {
     static const char * const excnames[] = {
@@ -84,7 +102,6 @@ trapname(int trapno) {
     return "(unknown trap)";
 }
 
-/* trap_in_kernel - test if trap happened in kernel */
 bool
 trap_in_kernel(struct trapframe *tf) {
     return (tf->tf_cs == (uint16_t)KERNEL_CS);
@@ -162,6 +179,7 @@ pgfault_handler(struct trapframe *tf) {
 static volatile int in_swap_tick_event = 0;
 extern struct mm_struct *check_mm_struct;
 
+/* 捕获并处理分发陷入帧 */
 static void
 trap_dispatch(struct trapframe *tf) {
     char c;
@@ -182,10 +200,14 @@ trap_dispatch(struct trapframe *tf) {
 #endif
         /* LAB1 YOUR CODE : STEP 3 */
         /* handle the timer interrupt */
-        /* (1) After a timer interrupt, you should record this event using a global variable (increase it), such as ticks in kern/driver/clock.c
-         * (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
-         * (3) Too Simple? Yes, I think so!
-         */
+        // (1) After a timer interrupt, you should record this event using a global variable (increase it), such as ticks in kern/driver/clock.c
+        ++ticks;
+        // (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
+        if (ticks == TICK_NUM) {
+            ticks = 0;
+            print_ticks();
+        }
+        // (3) Too Simple? Yes, I think so!
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
@@ -196,16 +218,37 @@ trap_dispatch(struct trapframe *tf) {
         cprintf("kbd [%03d] %c\n", c, c);
         break;
     //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
+    // 和 trapentry.S 密切相关
     case T_SWITCH_TOU:
+        // 如果当前已经是用户态，不执行操作
+        if (tf->tf_cs == USER_CS) break;
+
+        // 返回用户态，通用寄存器值不需要更改
+        tf->tf_cs = USER_CS; // 设置代码段，DPL 一定是 3
+        tf->tf_gs = tf->tf_fs = tf->tf_es = tf->tf_ds = tf->tf_ss = USER_DS; // 设置数据段
+        tf->tf_esp = (uintptr_t)tf + sizeof(struct trapframe) - 8; 
+        // IOPL 权限级限制 io 指令，将 IOPL 设为 3（用户态）
+        tf->tf_eflags |= FL_IOPL_MASK;
+
+        break;
     case T_SWITCH_TOK:
-        panic("T_SWITCH_** ??\n");
+        // 如果当前已经是内核态，不执行操作
+        if (tf->tf_cs == KERNEL_CS) break;
+
+        // 从用户态进入内核态
+        // 由于 trapentry 从 tf 中恢复现场，因此我们更改 tf 就可以改变调用完中断服务程序后的各个寄存器值
+        tf->tf_cs = KERNEL_CS; // 设置代码段为内核代码段
+        tf->tf_gs = tf->tf_fs = tf->tf_es = tf->tf_ds = tf->tf_ss = KERNEL_DS; // 设置数据段为内核数据段
+        tf->tf_eflags &= ~FL_IOPL_MASK; // IOPL 权限级限制 io 指令，将 IOPL 设为 0（内核态）
+
+        
         break;
     case IRQ_OFFSET + IRQ_IDE1:
     case IRQ_OFFSET + IRQ_IDE2:
         /* do nothing */
         break;
     default:
-        // in kernel, it must be a mistake
+        // 内核内部不可能触发陷入，如果发生则报错
         if ((tf->tf_cs & 3) == 0) {
             print_trapframe(tf);
             panic("unexpected trap in kernel.\n");
@@ -214,7 +257,9 @@ trap_dispatch(struct trapframe *tf) {
 }
 
 /* *
- * trap - handles or dispatches an exception/interrupt. if and when trap() returns,
+ * 处理中断/陷入异常。
+ * 该函数由 trapentry.S 调用，一旦发生中断，trayentry.S 负责收集所有必要的寄存器信息
+ * @brief handles or dispatches an exception/interrupt. if and when trap() returns,
  * the code in kern/trap/trapentry.S restores the old CPU state saved in the
  * trapframe and then uses the iret instruction to return from the exception.
  * */

@@ -44,47 +44,70 @@
  * These are arbitrarily chosen, but with care not to overlap
  * processor defined exceptions or interrupt vectors.
  * */
-#define T_SWITCH_TOU                120    // user/kernel switch
-#define T_SWITCH_TOK                121    // user/kernel switch
 
-/* registers as pushed by pushal */
+#define T_SWITCH_TOU           120   // switch to user mode
+#define T_SWITCH_TOK           121   // switch to kernel mode
+
+/**
+ * 顺序必须和 pushal 指令的顺序一致
+ * 
+ * https://c9x.me/x86/html/file_module_x86_id_270.html
+ */
 struct pushregs {
     uint32_t reg_edi;
     uint32_t reg_esi;
     uint32_t reg_ebp;
-    uint32_t reg_oesp;          /* Useless */
+    uint32_t reg_oesp;            /* 调用 pushal 指令的指令地址 */
     uint32_t reg_ebx;
     uint32_t reg_edx;
     uint32_t reg_ecx;
     uint32_t reg_eax;
 };
 
+/**
+ * 保存调用中断时的所有必要的寄存器值，以便恢复现场。
+ * 顺序必须和 trapentry.S 中代码保持一致
+ */
 struct trapframe {
     struct pushregs tf_regs;
     uint16_t tf_gs;
-    uint16_t tf_padding0;
+    uint16_t __gsh;
     uint16_t tf_fs;
-    uint16_t tf_padding1;
+    uint16_t __fsh;
     uint16_t tf_es;
-    uint16_t tf_padding2;
+    uint16_t __esh;
     uint16_t tf_ds;
-    uint16_t tf_padding3;
-    uint32_t tf_trapno;
-    /* below here defined by x86 hardware */
-    uint32_t tf_err;
+    uint16_t __dsh;
+    uint32_t tf_trapno; // 在 vectors.S 中压栈
+    uint32_t tf_err;    // 在 vectors.S 中压栈
+
+    /*
+     * 以下由 CPU 在中断触发时压栈，由 iret 指令弹出
+     * https://c9x.me/x86/html/file_module_x86_id_145.html
+     */
+
     uintptr_t tf_eip;
     uint16_t tf_cs;
-    uint16_t tf_padding4;
+    uint16_t __csh;
     uint32_t tf_eflags;
-    /* below here only when crossing rings, such as from user to kernel */
+
+    /* 变换特权级时由 CPU 压入 */
+
     uintptr_t tf_esp;
     uint16_t tf_ss;
-    uint16_t tf_padding5;
-} __attribute__((packed));
+    uint16_t __ssh;
+} __attribute__((packed)); // We insert padding by ourself
 
+/* 初始化 IDT，入口点定义在 kern/trap/vectors.S 中 */
 void idt_init(void);
+
+/* 输出陷入帧 */
 void print_trapframe(struct trapframe *tf);
+
+/* 输出寄存器值 */
 void print_regs(struct pushregs *regs);
+
+/* 检查陷入异常是否是由内核本身触发的 */
 bool trap_in_kernel(struct trapframe *tf);
 
 #endif /* !__KERN_TRAP_TRAP_H__ */
