@@ -386,7 +386,8 @@ page_remove(pde_t *pgdir, uintptr_t la) {
     }
 }
 
-int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
+int
+page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     pte_t *ptep = get_pte(pgdir, la, 1);
     if (ptep == NULL) {
         return -E_NO_MEM;
@@ -395,9 +396,11 @@ int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     if (*ptep & PTE_P) { // if page is present
         struct Page *p = pte2page(*ptep);
         if (p == page) {
+            // 我们希望插入的页面正好是原有的页面
             page_ref_dec(page);
         }
         else {
+            // 我们希望插入的页面正好是原有的页面
             page_remove_pte(pgdir, la, ptep);
         }
     }
