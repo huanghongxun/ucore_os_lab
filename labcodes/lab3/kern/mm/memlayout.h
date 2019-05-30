@@ -158,8 +158,8 @@ struct Page {
     uint32_t flags;                 // array of flags that describe the status of the page frame
     unsigned int property;          // 不同内存管理算法用作不同用处
     list_entry_t page_link;         // 空闲块列表 free_list 的链表项
-    list_entry_t pra_page_link;     // used for pra (page replace algorithm)
-    uintptr_t pra_vaddr;            // used for pra (page replace algorithm)
+    list_entry_t pra_page_link;     // 先进先出队列列表，used for pra (page replace algorithm)
+    uintptr_t pra_vaddr;            // 页面的虚拟地址，used for pra (page replace algorithm)
 };
 
 /* Flags describing the status of a page frame */

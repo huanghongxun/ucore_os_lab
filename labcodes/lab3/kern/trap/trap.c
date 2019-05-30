@@ -49,7 +49,7 @@ idt_init(void) {
     //     Can you see idt[256] in this file? Yes, it's IDT! you can use SETGATE macro to setup each item of IDT
 
     int i;
-    for (i = 0; i < IDT_SIZE; ++i) {
+    for (i = 0; i < 256; ++i) {
         // 中断处理程序在内核代码段中，特权级为内核级
         SETGATE(idt[i], GATE_INT, GD_KTEXT, __vectors[i], DPL_KERNEL);
     }
@@ -178,6 +178,7 @@ pgfault_handler(struct trapframe *tf) {
 
 static volatile int in_swap_tick_event = 0;
 extern struct mm_struct *check_mm_struct;
+struct trapframe kernel_tf;
 
 /* 捕获并处理分发陷入帧 */
 static void
@@ -222,13 +223,15 @@ trap_dispatch(struct trapframe *tf) {
     case T_SWITCH_TOU:
         // 如果当前已经是用户态，不执行操作
         if (tf->tf_cs == USER_CS) break;
-
+        kernel_tf = *tf;
         // 返回用户态，通用寄存器值不需要更改
-        tf->tf_cs = USER_CS; // 设置代码段，DPL 一定是 3
-        tf->tf_gs = tf->tf_fs = tf->tf_es = tf->tf_ds = tf->tf_ss = USER_DS; // 设置数据段
-        tf->tf_esp = (uintptr_t)tf + sizeof(struct trapframe) - 8; 
+        kernel_tf.tf_cs = USER_CS; // 设置代码段，DPL 一定是 3
+        kernel_tf.tf_ds = kernel_tf.tf_es = kernel_tf.tf_ss = USER_DS; // 设置数据段、堆栈段
+        kernel_tf.tf_esp = (uint32_t)tf + sizeof(struct trapframe) - 8;
         // IOPL 权限级限制 io 指令，将 IOPL 设为 3（用户态）
-        tf->tf_eflags |= FL_IOPL_MASK;
+        kernel_tf.tf_eflags |= FL_IOPL_MASK;
+
+        *((uint32_t *)tf - 1) = (uint32_t)&kernel_tf;
 
         break;
     case T_SWITCH_TOK:
@@ -238,17 +241,20 @@ trap_dispatch(struct trapframe *tf) {
         // 从用户态进入内核态
         // 由于 trapentry 从 tf 中恢复现场，因此我们更改 tf 就可以改变调用完中断服务程序后的各个寄存器值
         tf->tf_cs = KERNEL_CS; // 设置代码段为内核代码段
-        tf->tf_gs = tf->tf_fs = tf->tf_es = tf->tf_ds = tf->tf_ss = KERNEL_DS; // 设置数据段为内核数据段
+        tf->tf_ds = tf->tf_es = KERNEL_DS; // 设置数据段为内核数据段
         tf->tf_eflags &= ~FL_IOPL_MASK; // IOPL 权限级限制 io 指令，将 IOPL 设为 0（内核态）
 
-        
+        struct trapframe *pkernel_tf = (struct trapframe *)(tf->tf_esp - (sizeof(struct trapframe) - 8));
+        memmove(pkernel_tf, tf, sizeof(struct trapframe) - 8);
+        *((uint32_t *)tf - 1) = (uint32_t)pkernel_tf;
+
         break;
     case IRQ_OFFSET + IRQ_IDE1:
     case IRQ_OFFSET + IRQ_IDE2:
         /* do nothing */
         break;
     default:
-        // 内核内部不可能触发陷入，如果发生则报错
+        // 内核内部不可能触发未知中断
         if ((tf->tf_cs & 3) == 0) {
             print_trapframe(tf);
             panic("unexpected trap in kernel.\n");

@@ -46,7 +46,7 @@ kern_init(void) {
 
     //LAB1: CAHLLENGE 1 If you try to do it, uncomment lab1_switch_test()
     // user/kernel mode switch test
-    lab1_switch_test();
+    // lab1_switch_test();
 
     /* do nothing */
     while (1);
@@ -95,7 +95,7 @@ lab1_switch_to_user(void) {
     asm volatile (
         "sub $8, %%esp\n"
         "int %0\n" // 触发系统调用中断，已经在 trap.c/idt_init() 函数中将该中断的权限级设置为用户级
-        "movl %%ebp, %%esp"
+        "movl %%ebp, %%esp\n"
         :: "i"(T_SWITCH_TOU)
     );
 }

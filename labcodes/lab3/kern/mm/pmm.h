@@ -52,23 +52,15 @@ pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create);
 struct Page *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store);
 void page_remove(pde_t *pgdir, uintptr_t la);
 
-//page_insert - build the map of phy addr of an Page with the linear addr la
-// paramemters:
-//  pgdir: the kernel virtual base address of PDT
-//  page:  the Page which need to map
-//  la:    the linear address need to map
-//  perm:  the permission of this Page which is setted in related pte
-// return value: always 0
-//note: PT is changed, so the TLB need to be invalidate 
 /**
+ * 建立页面到线性地址的映射.
  * 
- * 该函数会修改页表，因此需要更新 TLB。
- * 
- * @param pgdir 
+ * @param pgdir PDT 的内核虚拟地址
  * @param page 需要映射的页
- * @param la 需要映射的虚拟地址
+ * @param la 需要映射的线性地址
  * @param perm 页权限
- * @return 0
+ * @return 0 表示正常，<0 为错误码
+ * @note 该函数会修改页表，因此需要更新 TLB.
  */
 int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm);
 

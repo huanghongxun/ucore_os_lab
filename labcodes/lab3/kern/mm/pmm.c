@@ -350,7 +350,7 @@ pmm_init(void) {
 pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     // LAB2 EXERCISE 2: YOUR CODE
     pde_t *pdep = &pgdir[PDX(la)];              // (1) find page directory entry
-    if (!(*pdep & PTE_P)) {                     // (2) check if entry is not present, 从 page_insert 中复制而来
+    if (!(*pdep & PTE_P)) {                     // (2) check if entry is not present
         if (create) {                           // (3) check if creating is needed
             // CAUTION: this page is used for page table, not for common data page
             struct Page *page = alloc_page();   // then alloc page for page table
@@ -412,9 +412,11 @@ page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     if (*ptep & PTE_P) { // if page is present
         struct Page *p = pte2page(*ptep);
         if (p == page) {
+            // 我们希望插入的页面正好是原有的页面
             page_ref_dec(page);
         }
         else {
+            // 我们需要替换现有的页面
             page_remove_pte(pgdir, la, ptep);
         }
     }
@@ -430,14 +432,19 @@ tlb_invalidate(pde_t *pgdir, uintptr_t la) {
     }
 }
 
-// pgdir_alloc_page - call alloc_page & page_insert functions to 
-//                  - allocate a page size memory & setup an addr map
-//                  - pa<->la with linear address la and the PDT pgdir
+/**
+ * 为指定线性地址分配一个页面.
+ * 
+ * @param la 需要映射的线性地址
+ * @param perm 页权限
+ * @return 分配的页面
+ */
 struct Page *
 pgdir_alloc_page(pde_t *pgdir, uintptr_t la, uint32_t perm) {
     struct Page *page = alloc_page();
     if (page != NULL) {
         if (page_insert(pgdir, page, la, perm) != 0) {
+            // 插入页面失败，回滚操作
             free_page(page);
             return NULL;
         }
