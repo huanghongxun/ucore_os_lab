@@ -74,15 +74,16 @@ struct gatedesc {
     unsigned gd_off_31_16 : 16;     // high bits of offset in segment
 };
 
-/* *
- * Set up a normal interrupt/trap gate descriptor
- *   - istrap: 1 for a trap (= exception) gate, 0 for an interrupt gate
- *   - sel: Code segment selector for interrupt/trap handler
- *   - off: Offset in code segment for interrupt/trap handler
- *   - dpl: Descriptor Privilege Level - the privilege level required
- *          for software to invoke this interrupt/trap gate explicitly
- *          using an int instruction.
- * */
+#define GATE_TRAP 1
+#define GATE_INT 0
+
+/**
+ * @brief 初始化中断/陷阱门描述符
+ * @param istrap 0 表示中断门，1 表示陷阱（异常）门
+ * @param sel 中断处理程序的代码段选择子
+ * @param off 中断处理程序的代码段内偏移
+ * @param dpl 描述符特权级
+ */
 #define SETGATE(gate, istrap, sel, off, dpl) {               \
         (gate).gd_off_15_0 = (uint32_t)(off) & 0xffff;      \
         (gate).gd_ss = (sel);                                \
@@ -95,7 +96,7 @@ struct gatedesc {
         (gate).gd_off_31_16 = (uint32_t)(off) >> 16;        \
     }
 
-/* Set up a call gate descriptor */
+/* 初始化函数调用门描述符 */
 #define SETCALLGATE(gate, ss, off, dpl) {                   \
         (gate).gd_off_15_0 = (uint32_t)(off) & 0xffff;      \
         (gate).gd_ss = (ss);                                \
@@ -108,7 +109,7 @@ struct gatedesc {
         (gate).gd_off_31_16 = (uint32_t)(off) >> 16;        \
     }
 
-/* segment descriptors */
+/* 段描述符 */
 struct segdesc {
     unsigned sd_lim_15_0 : 16;      // low bits of segment limit
     unsigned sd_base_15_0 : 16;     // low bits of segment base address
@@ -125,9 +126,12 @@ struct segdesc {
     unsigned sd_base_31_24 : 8;     // high bits of segment base address
 };
 
+// 空段
 #define SEG_NULL                                            \
     (struct segdesc) {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
+// 32 位 GPT 描述符，段基地址为 20 位，因此丢弃低 12 位
+// SEG(type, base, lim, dpl)
 #define SEG(type, base, lim, dpl)                           \
     (struct segdesc) {                                      \
         ((lim) >> 12) & 0xffff, (base) & 0xffff,            \
@@ -136,6 +140,7 @@ struct segdesc {
         (unsigned) (base) >> 24                             \
     }
 
+// 16 位段寄存器
 #define SEGTSS(type, base, lim, dpl)                        \
     (struct segdesc) {                                      \
         (lim) & 0xffff, (base) & 0xffff,                    \
@@ -144,22 +149,32 @@ struct segdesc {
         (unsigned) (base) >> 24                             \
     }
 
-/* task state segment format (as described by the Pentium architecture book) */
+/**
+ * TSS 段结构体
+ * @see tss_struct in include/asm-i386/processor.h
+ */
 struct taskstate {
-    uint32_t ts_link;       // old ts selector
-    uintptr_t ts_esp0;      // stack pointers and segment selectors
-    uint16_t ts_ss0;        // after an increase in privilege level
-    uint16_t ts_padding1;
-    uintptr_t ts_esp1;
-    uint16_t ts_ss1;
-    uint16_t ts_padding2;
-    uintptr_t ts_esp2;
-    uint16_t ts_ss2;
-    uint16_t ts_padding3;
-    uintptr_t ts_cr3;       // page directory base
-    uintptr_t ts_eip;       // saved state from last task switch
-    uint32_t ts_eflags;
-    uint32_t ts_eax;        // more saved state (registers)
+    uint32_t ts_link;       // 指向前一个任务的选择子
+
+    // ss0~3, esp0~3 由任务的创建者填写
+    uintptr_t ts_esp0;      // ring0 级堆栈指针寄存器
+    uint16_t ts_ss0;        // ring0 级堆栈段寄存器
+    uint16_t __ss0h;        // 保留位
+    // 我们只使用 ring0（内核态）和 ring3（用户态），因此 ss1,ss2,esp1,esp2 没有用
+    uintptr_t ts_esp1;      // ring1 级堆栈指针寄存器
+    uint16_t ts_ss1;        // ss1 is used to cache MSR_IA32_SYSENTER_CS
+    uint16_t __ss1h;        // 保留位
+    uintptr_t ts_esp2;      // ring2 级堆栈指针寄存器
+    uint16_t ts_ss2;        // ring2 级堆栈段寄存器
+    uint16_t __ss2h;        // 保留位
+    uintptr_t ts_cr3;       // 页目录基地址寄存器 CR3 (PDBR)
+
+    // 寄存器保存区域，用于任务切换时保存现场。
+    // 当任务首次执行时，CPU 从这些寄存器中加载初始执行环境，
+    // 从 CS:EIP 处开始执行任务的第一条指令
+    uintptr_t ts_eip;
+    uint32_t ts_eflags;     // IOPL 位决定当前任务的 IO 特权级别
+    uint32_t ts_eax;        // 通用寄存器
     uint32_t ts_ecx;
     uint32_t ts_edx;
     uint32_t ts_ebx;
@@ -167,34 +182,41 @@ struct taskstate {
     uintptr_t ts_ebp;
     uint32_t ts_esi;
     uint32_t ts_edi;
-    uint16_t ts_es;         // even more saved state (segment selectors)
-    uint16_t ts_padding4;
+    uint16_t ts_es;         // 段寄存器
+    uint16_t __esh;         // 保留位
     uint16_t ts_cs;
-    uint16_t ts_padding5;
+    uint16_t __csh;         // 保留位
     uint16_t ts_ss;
-    uint16_t ts_padding6;
+    uint16_t __ssh;         // 保留位
     uint16_t ts_ds;
-    uint16_t ts_padding7;
+    uint16_t __dsh;         // 保留位
     uint16_t ts_fs;
-    uint16_t ts_padding8;
+    uint16_t __fsh;         // 保留位
     uint16_t ts_gs;
-    uint16_t ts_padding9;
-    uint16_t ts_ldt;
-    uint16_t ts_padding10;
-    uint16_t ts_t;          // trap on task switch
-    uint16_t ts_iomb;       // i/o map base address
+    uint16_t __gsh;         // 保留位
+    // 寄存器保存区域
+
+    uint16_t ts_ldt;        // 当前任务的LDT选择子，由内核填写，以指向当前任务的LDT。该信息由处理器在任务切换时使用，在任务运行期间保持不变。
+    uint16_t __ldth;        // 保留位
+    uint16_t ts_t;          // Debug trap，用于软件调试。在多任务环境中，如果 T=1，则每次切换到该任务的时候，会引发一个调试异常中断（int 1）
+    uint16_t ts_iomb;       // i/o bitmap base address，用来决定当前的任务是否可以访问特定的硬件端口，需要设置为段界限之外
+
+    // 这里可以定义 io_bitmap，用于规定特权级不足时可以对哪些端口执行 IO 操作，ts_iomb 需要指向 io_bitmap
+    // 如果我们将 ts_iomb 设置超过了 TSS 段界限（段寄存器的长度限制），表示我们不使用 io_bitmap
+    // io_bitmap 以 0xFF 结尾，因此其长度 = 实际长度+1，且这个 0xFF 终止符需要在 TSS 段界限之内
+    // CPU 最多能访问 65536 个端口，因此 io_bitmap 大小需要为 65536 字节 (8KB)
 } __attribute__((packed));
 
 #endif /* !__ASSEMBLER__ */
 
 // A linear address 'la' has a three-part structure as follows:
 //
-// +--------10------+-------10-------+---------12----------+
+// +-------10-------+-------10-------+---------12----------+
 // | Page Directory |   Page Table   | Offset within Page  |
 // |      Index     |     Index      |                     |
 // +----------------+----------------+---------------------+
 //  \--- PDX(la) --/ \--- PTX(la) --/ \---- PGOFF(la) ----/
-//  \----------- PPN(la) -----------/
+//   \---------- PPN(la) ----------/
 //
 // The PDX, PTX, PGOFF, and PPN macros decompose linear addresses as shown.
 // To construct a linear address la from PDX(la), PTX(la), and PGOFF(la),
