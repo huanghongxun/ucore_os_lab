@@ -7,21 +7,33 @@
 #include <memlayout.h>
 
 
-// process's state in his life cycle
+/**
+ * 表示进程生命周期中的各个状态。
+ * 此处使用 RUNNABLE 来同时表示正在运行和等待时间片的进程。
+ */
 enum proc_state {
-    PROC_UNINIT = 0,  // uninitialized
-    PROC_SLEEPING,    // sleeping
-    PROC_RUNNABLE,    // runnable(maybe running)
-    PROC_ZOMBIE,      // almost dead, and wait parent proc to reclaim his resource
+    // 未初始化，新建进程时 (alloc_proc 函数) 将其状态设为该项
+    PROC_UNINIT = 0,
+    // 阻塞：一般是在等待资源
+    PROC_SLEEPING,
+    /**
+     * 就绪：运行中或等待运行中
+     * 进程已经可以运行了（可能已经在运行，或者未获得 CPU 的时间片，被其他进程抢占）。
+     * 我们进行调度时选择 RUNNABLE 的进程进行调度。
+     */
+    PROC_RUNNABLE,
+    // 进程执行结束，但未被操作系统或父进程回收
+    PROC_ZOMBIE,
 };
 
-// Saved registers for kernel context switches.
-// Don't need to save all the %fs etc. segment registers,
-// because they are constant across kernel contexts.
-// Save all the regular registers so we don't need to care
-// which are caller save, but not the return register %eax.
-// (Not saving %eax just simplifies the switching code.)
-// The layout of context must match code in switch.S.
+/**
+ * 内核态切换时来保存通用寄存器的结构体。
+ * 
+ * 由于上下文是内核的，内核态的段寄存器都是一样的（操作系统只用一个），
+ * 因此不需要保存段寄存器值。
+ * %eax 寄存器的值我们这里不予以进行维护。
+ * @note context 结构体的顺序必须和 switch.S 中的代码完全一致
+ */
 struct context {
     uint32_t eip;
     uint32_t esp;
@@ -39,21 +51,27 @@ struct context {
 
 extern list_entry_t proc_list;
 
+/**
+ * 进程控制块
+ * 由于我们把线程看作特殊的进程，我们就可以同时方便地管理进程和线程，因此线程和进程
+ * 都使用该结构体来存放相关信息。
+ * 在 alloc_proc 中初始化该结构体
+ */
 struct proc_struct {
-    enum proc_state state;                      // Process state
-    int pid;                                    // Process ID
-    int runs;                                   // the running times of Proces
-    uintptr_t kstack;                           // Process kernel stack
-    volatile bool need_resched;                 // bool value: need to be rescheduled to release CPU?
-    struct proc_struct *parent;                 // the parent process
-    struct mm_struct *mm;                       // Process's memory management field
-    struct context context;                     // Switch here to run process
-    struct trapframe *tf;                       // Trap frame for current interrupt
-    uintptr_t cr3;                              // CR3 register: the base addr of Page Directroy Table(PDT)
+    enum proc_state state;                      // 进程状态，初始化为 PROC_UNINIT
+    int pid;                                    // 进程 ID，初始化为 -1
+    int runs;                                   // 进程运行的次数，初始化为 0
+    uintptr_t kstack;                           // 进程内核栈地址
+    volatile bool need_resched;                 // 是否需要对当前进程进行调度，由 (sched.c:schedule) 函数进行管理，初始化时为 false
+    struct proc_struct *parent;                 // 父进程的结构体地址
+    struct mm_struct *mm;                       // 进程的内存管理器相关信息
+    struct context context;                     // 进程运行的寄存器上下文
+    struct trapframe *tf;                       // 当前中断的 trapframe
+    uintptr_t cr3;                              // CR3 寄存器: 进程自己的页目录表页基址
     uint32_t flags;                             // Process flag
-    char name[PROC_NAME_LEN + 1];               // Process name
-    list_entry_t list_link;                     // Process link list 
-    list_entry_t hash_link;                     // Process hash list
+    char name[PROC_NAME_LEN + 1];               // 进程名
+    list_entry_t list_link;                     // 进程集合列表的链表指针
+    list_entry_t hash_link;                     // 进程哈希表的链表指针
     int exit_code;                              // exit code (be sent to parent proc)
     uint32_t wait_state;                        // waiting state
     struct proc_struct *cptr, *yptr, *optr;     // relations between processes
