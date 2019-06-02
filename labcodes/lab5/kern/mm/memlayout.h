@@ -186,6 +186,7 @@ struct Page {
     int ref;                        // 页帧的引用计数器，若被页表引用的次数为 0，那么这个页帧将被释放
     uint32_t flags;                 // array of flags that describe the status of the page frame
     unsigned int property;          // 不同内存管理算法用作不同用处
+    int zone_num;                   // used in buddy system, the No. of zone which the page belongs to
     list_entry_t page_link;         // 空闲块列表 free_list 的链表项
     list_entry_t pra_page_link;     // 先进先出队列列表，used for pra (page replace algorithm)
     uintptr_t pra_vaddr;            // 页面的虚拟地址，used for pra (page replace algorithm)
@@ -227,6 +228,11 @@ typedef struct {
     unsigned int nr_free;           // 空闲块的总数（以页为单位）
 } free_area_t;
 
+/* for slab style kmalloc */
+#define PG_slab                     2       // page frame is included in a slab
+#define SetPageSlab(page)           set_bit(PG_slab, &((page)->flags))
+#define ClearPageSlab(page)         clear_bit(PG_slab, &((page)->flags))
+#define PageSlab(page)              test_bit(PG_slab, &((page)->flags))
 
 #endif /* !__ASSEMBLER__ */
 

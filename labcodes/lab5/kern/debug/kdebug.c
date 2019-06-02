@@ -327,7 +327,6 @@ print_stackframe(void) {
     // (3) from 0 .. STACKFRAME_DEPTH
 
     int i, j;
-    uint32_t *args;
 
     /**
      * Note that, the length of ebp-chain is limited. In boot/bootasm.S, before jumping
@@ -337,7 +336,7 @@ print_stackframe(void) {
         // (3.1) printf value of ebp, eip
         cprintf("ebp: 0x%08x, eip: 0x%08x, args", ebp, eip);
         // (3.2) (uint32_t)calling arguments [0..4] = the contents in address (uint32_t)ebp +2 [0..4]
-        args = (uint32_t *)ebp + 2;
+        uint32_t *args = (uint32_t *)ebp + 2;
         for (j = 0; j < 4; ++j) cprintf("%c 0x%08x", j == 0 ? ':' : ',', args[j]);
         // (3.3) cprintf("\n");
         cprintf("\n");

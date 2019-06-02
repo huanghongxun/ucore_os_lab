@@ -74,7 +74,9 @@ struct proc_struct {
     list_entry_t hash_link;                     // 进程哈希表的链表指针
     int exit_code;                              // exit code (be sent to parent proc)
     uint32_t wait_state;                        // waiting state
-    struct proc_struct *cptr, *yptr, *optr;     // relations between processes
+    struct proc_struct *cptr;                   // 第一个子进程的结构体地址
+    struct proc_struct *yptr;                   // 当前进程的右（年轻）兄弟进程（与当前进程的父进程相同）的结构体地址
+    struct proc_struct *optr;                   // 当前进程的左（年长）兄弟进程（与当前进程的父进程相同）的结构体地址
 };
 
 #define PF_EXITING                  0x00000001      // getting shutdown

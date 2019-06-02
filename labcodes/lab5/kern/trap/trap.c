@@ -242,15 +242,17 @@ trap_dispatch(struct trapframe *tf) {
         // (1) After a timer interrupt, you should record this event using a global variable (increase it), such as ticks in kern/driver/clock.c
         ++ticks;
         // (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
+        assert(ticks <= TICK_NUM);
         if (ticks == TICK_NUM) {
             ticks = 0;
-            print_ticks();
+            // print_ticks();
 
             /* LAB5 YOUR CODE */
             /* you should update you lab1 code (just add ONE or TWO lines of code):
-            *    Every TICK_NUM cycle, you should set current process's current->need_resched = 1
-            */
-            current->need_resched = 1;
+             *    Every TICK_NUM cycle, you should set current process's current->need_resched = 1
+             */
+            assert(current != NULL); // 无论如何当前都必存在进程，无论是 initproc、idleproc 还是其他用户进程
+            current->need_resched = 1; // 系统通过定时时钟中断来抢占 CPU 来进行调度
         }
         // (3) Too Simple? Yes, I think so!
         break;

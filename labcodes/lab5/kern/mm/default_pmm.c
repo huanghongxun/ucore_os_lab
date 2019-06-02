@@ -78,6 +78,7 @@ default_alloc_pages(size_t n) {
             // 分裂块
             struct Page *p = page + n;
             p->property = page->property - n;
+            SetPageProperty(p);
             // 在原处插入新节点以保证 free_list 是按照页地址顺序存储的
             list_add(&(page->page_link), &(p->page_link));
         }
@@ -94,6 +95,7 @@ default_alloc_pages(size_t n) {
  */
 static void
 default_free_pages(struct Page *base, size_t n) {
+    assert(n > 0);
     struct Page *p = base;
     for (; p != base + n; p ++) {
         assert(!PageReserved(p) && !PageProperty(p));

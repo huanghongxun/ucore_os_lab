@@ -122,15 +122,23 @@ get_proc_name(struct proc_struct *proc) {
     return memcpy(name, proc->name, PROC_NAME_LEN);
 }
 
-// set_links - set the relation links of process
+/**
+ * 设置进程间的关系指针 optr、cptr、yptr
+ */
 static void
 set_links(struct proc_struct *proc) {
+    // 将 proc 进程加入到进程列表中
     list_add(&proc_list, &(proc->list_link));
+    // 当前进程是最新的，显然没有更年轻的兄弟进程
     proc->yptr = NULL;
+    // 如果当前进程存在更年长的兄弟进程
     if ((proc->optr = proc->parent->cptr) != NULL) {
+        // 维护指针关系，确保多叉树的正确性
         proc->optr->yptr = proc;
     }
+    // 父进程的最新子进程设为 proc
     proc->parent->cptr = proc;
+    // 我们新建了一个父进程
     nr_process ++;
 }
 
@@ -290,8 +298,7 @@ setup_pgdir(struct mm_struct *mm) {
 }
 
 // put_pgdir - free the memory space of PDT
-static void
-put_pgdir(struct mm_struct *mm) {
+static void put_pgdir(struct mm_struct *mm) {
     free_page(kva2page(mm->pgdir));
 }
 
@@ -386,12 +393,12 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
 
     //    1. call alloc_proc to allocate a proc_struct
     // 新建 proc 结构体并初始化为空
-    if (!(proc = alloc_proc())) {
+    if ((proc = alloc_proc()) == NULL) {
         goto fork_out;
     }
     // 将子进程的父亲设置为当前进程
     proc->parent = current;
-    assert(current->wait_state == 0);
+    assert(current->wait_state == 0); // 调用 fork 的进程必定在运行中
 
     //    2. call setup_kstack to allocate a kernel stack for child process
     // 分配页帧给子进程内核栈
@@ -412,7 +419,6 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
     local_intr_save(intr_flag); // 关闭中断确保安全
     {
         proc->pid = get_pid(); // 为进程分配唯一的 pid
-        ++nr_process; // 进程数
         hash_proc(proc); // 将进程加入到哈希表中
         set_links(proc); // 将进程加入到进程列表中
     }
@@ -819,7 +825,8 @@ init_main(void *arg) {
     assert(nr_process == 2);
     assert(list_next(&proc_list) == &(initproc->list_link));
     assert(list_prev(&proc_list) == &(initproc->list_link));
-
+    assert(nr_free_pages_store == nr_free_pages());
+    assert(kernel_allocated_store == kallocated());
     cprintf("init check memory pass.\n");
     return 0;
 }
