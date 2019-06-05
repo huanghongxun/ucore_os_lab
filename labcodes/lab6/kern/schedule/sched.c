@@ -75,8 +75,10 @@ wakeup_proc(struct proc_struct *proc) {
     local_intr_restore(intr_flag);
 }
 
-void
-schedule(void) {
+/**
+ * 调度程序，选择一个可以运行的进程抢占 CPU
+ */
+void schedule(void) {
     bool intr_flag;
     struct proc_struct *next;
     local_intr_save(intr_flag);
@@ -92,6 +94,7 @@ schedule(void) {
             next = idleproc;
         }
         next->runs ++;
+        // 切换上下文给该进程
         if (next != current) {
             proc_run(next);
         }

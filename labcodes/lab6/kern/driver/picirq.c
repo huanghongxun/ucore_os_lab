@@ -27,7 +27,6 @@ pic_enable(unsigned int irq) {
     pic_setmask(irq_mask & ~(1 << irq));
 }
 
-/* pic_init - initialize the 8259A interrupt controllers */
 void
 pic_init(void) {
     did_init = 1;

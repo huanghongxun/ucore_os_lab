@@ -7,6 +7,8 @@ ENTRY(kern_entry)
 
 SECTIONS {
     /* Load the kernel at this address: "." means the current address */
+    /* 根据内核虚存结构，KERNBASE=0xC0000000 以上为映射后的物理内存 */
+    /* 物理内存 0x000000 ~ 0x100000 分配给 bootloader 使用，见 memlayout.h */
     . = 0xC0100000;
 
     .text : {
@@ -49,6 +51,7 @@ SECTIONS {
         *(.data.pgdir)
     }
 
+    /* 定义 edata 符号，这里指向 .data 段的结束地址， */
     PROVIDE(edata = .);
 
     .bss : {
