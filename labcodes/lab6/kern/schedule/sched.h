@@ -15,17 +15,17 @@ struct run_queue;
 // core scheduler quite extensible. These classes (the scheduler modules) encapsulate 
 // the scheduling policies. 
 struct sched_class {
-    // the name of sched_class
+    // sched_class 的名称
     const char *name;
-    // Init the run queue
+    // 初始化 run queue 的函数
     void (*init)(struct run_queue *rq);
-    // put the proc into runqueue, and this function must be called with rq_lock
+    // 将进程加入 run queue 中，必须使用 rq_lock
     void (*enqueue)(struct run_queue *rq, struct proc_struct *proc);
-    // get the proc out runqueue, and this function must be called with rq_lock
+    // 从 run queue 中弹出一个进程，必须使用 rq_lock
     void (*dequeue)(struct run_queue *rq, struct proc_struct *proc);
-    // choose the next runnable task
+    // 选择下一个要运行的可执行任务
     struct proc_struct *(*pick_next)(struct run_queue *rq);
-    // dealer of the time-tick
+    // 时钟中断处理函数
     void (*proc_tick)(struct run_queue *rq, struct proc_struct *proc);
     /* for SMP support in the future
      *  load_balance

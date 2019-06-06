@@ -78,9 +78,9 @@ struct proc_struct {
     struct proc_struct *cptr;                   // 第一个子进程的结构体地址
     struct proc_struct *yptr;                   // 当前进程的右（年轻）兄弟进程（与当前进程的父进程相同）的结构体地址
     struct proc_struct *optr;                   // 当前进程的左（年长）兄弟进程（与当前进程的父进程相同）的结构体地址
-    struct run_queue *rq;                       // running queue contains Process
-    list_entry_t run_link;                      // the entry linked in run queue
-    int time_slice;                             // time slice for occupying the CPU
+    struct run_queue *rq;                       // 包含本进程的 run queue
+    list_entry_t run_link;                      // run queue 的链表指针
+    int time_slice;                             // 分配给该进程的 CPU 时间片
     skew_heap_entry_t lab6_run_pool;            // FOR LAB6 ONLY: the entry in the run pool
     uint32_t lab6_stride;                       // FOR LAB6 ONLY: the current stride of the process 
     uint32_t lab6_priority;                     // FOR LAB6 ONLY: the priority of process, set by lab6_set_priority(uint32_t)

@@ -66,6 +66,7 @@ skew_heap_insert(skew_heap_entry_t *a, skew_heap_entry_t *b,
      return skew_heap_merge(a, b, comp);
 }
 
+// remove b in a
 static inline skew_heap_entry_t *
 skew_heap_remove(skew_heap_entry_t *a, skew_heap_entry_t *b,
                  compare_f comp)
