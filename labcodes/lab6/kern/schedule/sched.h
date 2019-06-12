@@ -36,12 +36,15 @@ struct sched_class {
      */
 };
 
+/**
+ * 存储调度算法维护的进程队列等数据结构
+ */
 struct run_queue {
-    list_entry_t run_list;
-    unsigned int proc_num;
-    int max_time_slice;
+    list_entry_t run_list; // 调度队列的头指针
+    unsigned int proc_num; // 在调度队列中的进程数
+    int max_time_slice; // 队列的最大时间片，进程重新获得时间片的时间为该项值
     // For LAB6 ONLY
-    skew_heap_entry_t *lab6_run_pool;
+    skew_heap_entry_t *lab6_run_pool; // 对于 Stride Scheduling 算法，该项为左偏树的根节点
 };
 
 void sched_init(void);

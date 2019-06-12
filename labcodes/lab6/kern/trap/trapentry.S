@@ -8,26 +8,29 @@
 .text
 .globl __alltraps
 __alltraps:
-    # push registers to build a trap frame
-    # therefore make the stack look like a struct trapframe
+    # 以下代码在内核栈中构建 trapframe，trapframe 需要寄存器的数据
+    # 因此通过 pushl 和 pushal 来构建 trapframe 的数据
+    # trapframe 还包含由 CPU 装载进内核栈中的数据 ss、esp 等内容
     pushl %ds # trapframe.__dsh & ds
     pushl %es # trapframe.__esh & es
     pushl %fs # trapframe.__fsh & fs
     pushl %gs # trapframe.__gsh & gs
     pushal    # trapframe.tf_regs, pushl %esp 指向这里，也就是 tf 指向这里
+    # trapframe 到此结束
 
     # 设置数据段为内核数据段
     movl $GD_KDATA, %eax
     movw %ax, %ds
     movw %ax, %es
 
-    # push %esp to pass a pointer to the trapframe as an argument to trap()
+    # 此时 esp 指向栈顶，也就是 trapframe 的地址
+    # 将 esp 压栈，为 trap 函数的参数，
     pushl %esp     # tf - 1 指向这里
 
-    # call trap(tf), where tf=%esp
+    # 调用 trap(tf), 其中 tf=%esp
     call trap
 
-    # pop the pushed stack pointer
+    # 弹出压入的 %esp
     popl %esp
 
     # return falls through to trapret...

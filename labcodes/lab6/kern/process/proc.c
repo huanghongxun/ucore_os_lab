@@ -133,12 +133,12 @@ alloc_proc(void) {
          *     uint32_t lab6_stride;                       // FOR LAB6 ONLY: the current stride of the process
          *     uint32_t lab6_priority;                     // FOR LAB6 ONLY: the priority of process, set by lab6_set_priority(uint32_t)
          */
-       proc->rq = NULL;
-       list_init(&proc->run_link);
-       proc->time_slice = 0;
+       proc->rq = NULL; // 初始化该进程所属的运行队列
+       list_init(&proc->run_link); // 初始化该进程所属队列的指针
+       proc->time_slice = 0; // 初始化当前进程的时间片为 0
        skew_heap_init(&proc->lab6_run_pool);
-       proc->lab6_stride = 0;
-       proc->lab6_priority = 1;
+       proc->lab6_stride = 0; // 设置当前进程的
+       proc->lab6_priority = 1; // 设置当前进程的优先级为最低
     }
     return proc;
 }

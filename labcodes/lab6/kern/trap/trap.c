@@ -234,10 +234,6 @@ trap_dispatch(struct trapframe *tf) {
         syscall();
         break;
     case IRQ_OFFSET + IRQ_TIMER:
-#if 0
-    LAB3 : If some page replacement algorithm(such as CLOCK PRA) need tick to change the priority of pages,
-    then you can add code here. 
-#endif
         ++ticks;
         /* LAB6 YOUR CODE */
         assert(current != NULL);
@@ -322,6 +318,9 @@ trap(struct trapframe *tf) {
         trap_dispatch(tf);
     
         current->tf = otf;
+        // 由于可能在系统调用或发生其他中断从
+        // 用户态进入内核态后再次发生中断，
+        // 因此我们需要检查当前状态是不是不是二级中断
         if (!in_kernel) {
             if (current->flags & PF_EXITING) {
                 do_exit(-E_KILLED);
