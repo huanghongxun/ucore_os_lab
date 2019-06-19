@@ -268,7 +268,7 @@ TARGETS: $(TARGETS)
 QEMUOPTS = -hda $(UCOREIMG) -drive file=$(SWAPIMG),media=disk,cache=writeback
 
 .PHONY: qemu qemu-nox debug debug-nox
-qemu-mon: $(UCOREIMG)  $(SWAPIMG)
+qemu-mon: $(UCOREIMG) $(SWAPIMG)
 	$(V)$(QEMU)  -no-reboot -monitor stdio $(QEMUOPTS) -serial null
 qemu: $(UCOREIMG) $(SWAPIMG)
 	$(V)$(QEMU)  -no-reboot -parallel stdio $(QEMUOPTS) -serial null
@@ -311,6 +311,7 @@ TOUCH_FILES		:= kern/process/proc.c
 MAKEOPTS		:= --quiet --no-print-directory
 
 grade:
+	@echo "You can add variable VERBOSE_QEMU to view qemu output"
 	$(V)$(MAKE) $(MAKEOPTS) clean
 	$(V)$(SH) tools/grade.sh
 

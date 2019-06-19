@@ -201,7 +201,7 @@ dup_mmap(struct mm_struct *to, struct mm_struct *from) {
 
         insert_vma_struct(to, nvma);
 
-        bool share = 0;
+        bool share = 0; // LAB5 CHALLEGE: change to share = 1
         if (copy_range(to->pgdir, from->pgdir, vma->vm_start, vma->vm_end, share) != 0) {
             return -E_NO_MEM;
         }
@@ -367,26 +367,16 @@ check_pgfault(void) {
 //page fault number
 volatile unsigned int pgfault_num=0;
 
-/* do_pgfault - interrupt handler to process the page fault execption
- * @mm         : the control struct for a set of vma using the same PDT
- * @error_code : the error code recorded in trapframe->tf_err which is setted by x86 hardware
- * @addr       : the addr which causes a memory access exception, (the contents of the CR2 register)
- *
- * CALL GRAPH: trap--> trap_dispatch-->pgfault_handler-->do_pgfault
- * The processor provides ucore's do_pgfault function with two items of information to aid in diagnosing
- * the exception and recovering from it.
- *   (1) The contents of the CR2 register. The processor loads the CR2 register with the
- *       32-bit linear address that generated the exception. The do_pgfault fun can
- *       use this address to locate the corresponding page directory and page-table
- *       entries.
- *   (2) An error code on the kernel stack. The error code for a page fault has a format different from
- *       that for other exceptions. The error code tells the exception handler three things:
- *         -- The P flag   (bit 0) indicates whether the exception was due to a not-present page (0)
- *            or to either an access rights violation or the use of a reserved bit (1).
- *         -- The W/R flag (bit 1) indicates whether the memory access that caused the exception
- *            was a read (0) or write (1).
- *         -- The U/S flag (bit 2) indicates whether the processor was executing at user mode (1)
- *            or supervisor mode (0) at the time of the exception.
+/**
+ * 处理缺页异常的中断处理程序.
+ * 
+ * @param mm the control struct for a set of vma using the same PDT
+ * @param error_code CPU 产生的缺页异常错误码，记录在 trapframe->tf_err 中.
+ *                   P 标记 (bit 0) P=0 表示访问不存在的页面 (PTE_P = 0)；P=1 表示访问权限不足或访问保留页面.
+ *                   W/R 标记 (bit 1) R=0 表示执行读取操作时失败；W=1 表示执行写入操作时失败.
+ *                   U/S 标记 (bit 2) S=0 表示在内核态访问内存时失败；U=1 表示在用户态访问内存时失败.
+ * @param addr 引发缺页异常的线性地址 (记录在 CR2 寄存器中)
+ * @note 调用链: trap --> trap_dispatch --> pgfault_handler --> do_pgfault
  */
 int
 do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
@@ -434,65 +424,79 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     ret = -E_NO_MEM;
 
     pte_t *ptep=NULL;
-    /*LAB3 EXERCISE 1: YOUR CODE
-    * Maybe you want help comment, BELOW comments can help you finish the code
-    *
-    * Some Useful MACROs and DEFINEs, you can use them in below implementation.
-    * MACROs or Functions:
-    *   get_pte : get an pte and return the kernel virtual address of this pte for la
-    *             if the PT contians this pte didn't exist, alloc a page for PT (notice the 3th parameter '1')
-    *   pgdir_alloc_page : call alloc_page & page_insert functions to allocate a page size memory & setup
-    *             an addr map pa<--->la with linear address la and the PDT pgdir
-    * DEFINES:
-    *   VM_WRITE  : If vma->vm_flags & VM_WRITE == 1/0, then the vma is writable/non writable
-    *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
-    *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
-    * VARIABLES:
-    *   mm->pgdir : the PDT of these vma
-    *
-    */
-#if 0
     /*LAB3 EXERCISE 1: YOUR CODE*/
-    ptep = ???              //(1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
-    if (*ptep == 0) {
-                            //(2) if the phy addr isn't exist, then alloc a page & map the phy addr with logical addr
-
+    // (1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
+    if (!(ptep = get_pte(mm->pgdir, addr, true))) {
+        cprintf("do_pgfault failed: no enough space for allocating a page for page table in get_pte");
+        goto failed;
     }
-    else {
-    /*LAB3 EXERCISE 2: YOUR CODE
-    * Now we think this pte is a  swap entry, we should load data from disk to a page with phy addr,
-    * and map the phy addr with logical addr, trigger swap manager to record the access situation of this page.
-    *
-    *  Some Useful MACROs and DEFINEs, you can use them in below implementation.
-    *  MACROs or Functions:
-    *    swap_in(mm, addr, &page) : alloc a memory page, then according to the swap entry in PTE for addr,
-    *                               find the addr of disk page, read the content of disk page into this memroy page
-    *    page_insert ： build the map of phy addr of an Page with the linear addr la
-    *    swap_map_swappable ： set the page swappable
-    */
-    /*
-     * LAB5 CHALLENGE ( the implmentation Copy on Write)
-		There are 2 situlations when code comes here.
-		  1) *ptep & PTE_P == 1, it means one process try to write a readonly page. 
-		     If the vma includes this addr is writable, then we can set the page writable by rewrite the *ptep.
-		     This method could be used to implement the Copy on Write (COW) thchnology(a fast fork process method).
-		  2) *ptep & PTE_P == 0 & but *ptep!=0, it means this pte is a  swap entry.
-		     We should add the LAB3's results here.
-     */
-        if(swap_init_ok) {
-            struct Page *page=NULL;
-                                    //(1）According to the mm AND addr, try to load the content of right disk page
-                                    //    into the memory which page managed.
-                                    //(2) According to the mm, addr AND page, setup the map of phy addr <---> logical addr
-                                    //(3) make the page swappable.
-                                    //(4) [NOTICE]: you myabe need to update your lab3's implementation for LAB5's normal execution.
-        }
-        else {
-            cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
+    if (!*ptep) {
+        // (2) if the phy addr isn't exist (No page table entry exists),
+        // then alloc a page & map the phy addr with logical addr
+        if (!pgdir_alloc_page(mm->pgdir, addr, perm)) {
+            cprintf("do_pgfault failed: no enough space for allocating a page for user");
             goto failed;
         }
+    }
+    else {
+        struct Page *page = NULL;
+        /*
+         * LAB5 CHALLENGE (the implmentation Copy on Write)
+         */
+        if (*ptep & PTE_P) {
+            // 如果我们写入一个已经在内存中的页面而导致缺页异常，
+            // 一定是用户程序没有该页的写入权限（页面写保护/只读），
+            // 页面只读是因为我们采取了页面共享的策略以减少内存占用，
+            // 因此我们需要实现 copy-on-write 算法来保证用户仍能
+            // 对这些页面进行写入操作。
+            // 若查询 VMA 已知该页面是真的可写的，我们创建一个新的
+            // 页面，并修改 *ptep
+            if (vma->vm_flags & VM_WRITE) {
+                struct Page *opage = pte2page(*ptep);
+                if (page_ref(opage) == 1) {
+                    cprintf("do_pgfault: COW");
+                    // 如果我们写入的页面引用数刚好为 1，
+                    // 那么当前页面就可以直接设置为可写
+                    page = opage;
+                } else if (page_ref(opage) > 1) {
+                    // 否则复制出来一个新页面
+                    cprintf("do_pgfault: COW: allocating a new page");
+                    page_ref_dec(opage);
+                    if ((page = alloc_page()) == NULL) {
+                        cprintf("do_pgfault failed: no enough space for allocating a page for user");
+                        goto failed;
+                    }
+                    void *src_kvaddr = page2kva(opage);
+                    void *dst_kvaddr = page2kva(page);
+                    memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
+                } else {
+                    panic("error writing to a non-ref page");
+                }
+            } else {
+                panic("error writing to a non-writable page");
+            }
+        } else {
+            // 若页面不存在，表明该页被交换进磁盘了，我们需要执行页交换操作
+            /*
+            * LAB3 EXERCISE 2: YOUR CODE
+            * Now we think this pte is a swap entry, we should load data from disk to a page with physical address,
+            * and map the phy addr with logical addr, trigger swap manager to record the access situation of this page.
+            */
+            if (swap_init_ok) {
+                if (swap_in(mm, addr, &page) != 0) {        // (1) According to the mm AND addr, try to load the content of right disk page
+                    cprintf("do_pgfault failed: swap_in");  //     into the memory which page managed.
+                    goto failed;
+                }
+            }
+            else {
+                cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
+                goto failed;
+            }
+        }
+        page_insert(mm->pgdir, page, addr, perm);   // (2) According to the mm, addr AND page, setup the map of phy addr <---> logical addr
+        swap_map_swappable(mm, addr, page, true);   // (3) make the page swappable.
+        page->pra_vaddr = addr;
    }
-#endif
    ret = 0;
 failed:
     return ret;
