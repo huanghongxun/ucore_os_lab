@@ -560,19 +560,19 @@ else {
 
 1. fork
 
-   通过 `SYS_fork` 系统调用，调用 `do_fork` 函数实现
+   通过 `SYS_fork` 系统调用，调用 `do_fork` 函数实现，分配内存空间、设置 `trapframe`，并通过 `wakeup_proc` 将进程状态设置为 RUNNABLE 使进程可以被调度 。
 
 2. exec
 
-   通过 `SYS_exec` 系统调用，调用 `do_execve` 函数实现。该函数释放当前进程的内存，并调用 `load_icode` 为新程序分配空间。
+   通过 `SYS_exec` 系统调用，调用 `do_execve` 函数实现。该函数释放当前进程的内存，并调用 `load_icode` 为新程序分配空间、设置 `trapframe`。中断结束后就进入新程序代码执行了。
 
 3. wait
 
-   通过 `SYS_wait` 系统调用，调用 `do_wait` 函数实现。
+   通过 `SYS_wait` 系统调用，调用 `do_wait` 函数实现。首先检查需要等待的进程，如果是等待子进程则寻找是否以及存在结束（ZOMBIE）的子进程，如果存在释放这个子进程的资源并返回；否则启动调度切换到别的进程执行。
 
 4. exit
 
-   通过 `SYS_exit` 系统调用，调用 `do_exit` 函数实现
+   通过 `SYS_exit` 系统调用，调用 `do_exit` 函数实现。
 
 
 

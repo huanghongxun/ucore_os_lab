@@ -1,595 +1,570 @@
-# 操作系统实验 Lab 5 内核线程管理
+# 操作系统实验 Lab 6 调度器
+
 ## 实验目的
 
-1. 了解第一个用户进程创建过程
-2. 了解系统调用框架的实现机制
-3. 了解ucore如何实现系统调用 sys_fork/sys_exec/sys_exit/sys_wait 来进行进程管理
+- 理解操作系统的调度管理机制
+- 熟悉 ucore 的系统调度器框架，以及缺省的 Round-Robin 调度算法
+- 基于调度器框架实现一个 Stride Scheduling 调度算法来替换缺省的调度算法
 
 ## 实验内容
 
-实验5（ucore lab4）完成了内核线程，但到目前为止，所有的运行都在内核态执行。本实验 6（ucore lab5）将创建用户进程，让用户进程在用户态执行，且在需要ucore支持时，可通过系统调用来让ucore提供服务。为此需要构造出第一个用户进程，并通过系统调用sys_fork/sys_exec/sys_exit/sys_wait来支持运行不同的应用程序，完成对用户进程的执行过程的基本管理。
+- 实验6（ucore lab5）完成了用户进程的管理，可在用户态运行多个进程。但到目前为止，采用的调度策略是很简单的FIFO调度策略。
+- 本次实验7 （ucore lab6） ，主要是熟悉 ucore 的系统调度器框架，以及基于此框架的 Round-Robin（RR） 调度算法。然后参考 RR 调度算法的实现，完成 Stride Scheduling 调度算法。
 
-## 练习1：加载应用程序并执行
+## 练习0：填写已有实验
 
->do_execve 函数调用load_icode（位于 kern/process/proc.c 中）来加载并解析一个处于内存中的ELF执行文件格式的应用程序，建立相应的用户内存空间来放置应用程序的代码段、数据段等，且要设置好proc_struct结构中的成员变量trapframe中的内容，确保在执行此进程后，能够从应用程序设定的起始执行地址开始执行。需设置正确的trapframe内容。
+> 请把你做的实验2/3/4/5的代码填入本实验中代码中有“LAB1”/“LAB2”/“LAB3”/“LAB4”“LAB5”的注释相应部分。 并确保编译通过。注意：为了能够正确执行lab6的测试应用程序，可能需对已完成的实验1/2/3/4/5的代码进行进一步改进。
 
-### 设计实现过程
+#### `proc.c:alloc_proc`
 
-#### `do_execve`
-
-我们调用外部程序的过程如下：
-
-* 系统进程 `initproc` 在 `init_main` 中会启动新内核线程并调用 `KERNEL_EXECVE` 宏
-
-* `kernel.sym` 是编译完的用户程序，其中包含所有用户程序的入口地址，比如 `_binary_obj___user_yield_out_start`；和用户程序代码长度，比如 `_binary_obj___user_yield_out_size`
-
-* `KERNEL_EXECVE` 宏负责链接并找到这些外部程序的内核虚拟地址
-
-* 这个地址传给 `kernel_execve`
-
-* 触发 `SYS_exec` 系统调用，进入操作系统
-
-* 调用 `do_execve` 函数，并释放当期进程原有的页面（因为外部程序要抢占这个进程的资源，当前进程原来的资源都没有用了，因此需要释放）
-
-* 调用 `load_icode` 函数加载外部程序代码（在内存中）到当前进程
-
-  * (1) 为当期进程分配内存管理器（由于 `do_execve` 函数中已经释放了父进程 `fork` 过来的内存管理器和页面，当前进程是完全没有内存管理器以及内存的，我们需要为这个进程重新分配一次）
-
-    ```cpp
-    if ((mm = mm_create()) == NULL) {
-        goto bad_mm;
-    }
-    ```
-
-  * (2) 为当期进程分配页目录表
-
-    ```cpp
-    if (setup_pgdir(mm) != 0) {
-        goto bad_pgdir_cleanup_mm;
-    }
-    ```
-
-  * (3.1~3.4) 解析当期程序的 ELF 头，并按照 ELF 头分配内存空间
-
-    ```cpp
-    struct Page *page;
-    //(3.1) get the file header of the bianry program (ELF format)
-    struct elfhdr *elf = (struct elfhdr *)binary;
-    //(3.2) get the entry of the program section headers of the bianry program (ELF format)
-    struct proghdr *ph = (struct proghdr *)(binary + elf->e_phoff);
-    //(3.3) This program is valid?
-    if (elf->e_magic != ELF_MAGIC) {
-        ret = -E_INVAL_ELF;
-        goto bad_elf_cleanup_pgdir;
-    }
-    
-    uint32_t vm_flags, perm;
-    struct proghdr *ph_end = ph + elf->e_phnum;
-    for (; ph < ph_end; ph ++) {
-        //(3.4) find every program section headers
-        if (ph->p_type != ELF_PT_LOAD) {
-            continue ;
-        }
-        if (ph->p_filesz > ph->p_memsz) {
-            ret = -E_INVAL_ELF;
-            goto bad_cleanup_mmap;
-        }
-        if (ph->p_filesz == 0) {
-            continue ;
-        }
-    ```
-
-  * (3.5~2.6) 分配新的连续虚拟内存空间 (VMA)，并分配用户代码段/数据段/BSS段
-
-    ```cpp
-    vm_flags = 0, perm = PTE_U;
-    if (ph->p_flags & ELF_PF_X) vm_flags |= VM_EXEC;
-    if (ph->p_flags & ELF_PF_W) vm_flags |= VM_WRITE;
-    if (ph->p_flags & ELF_PF_R) vm_flags |= VM_READ;
-    if (vm_flags & VM_WRITE) perm |= PTE_W;
-    if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0) {
-        goto bad_cleanup_mmap;
-    }
-    unsigned char *from = binary + ph->p_offset;
-    size_t off, size;
-    uintptr_t start = ph->p_va, end, la = ROUNDDOWN(start, PGSIZE);
-    
-    ret = -E_NO_MEM;
-    ```
-
-  * (4) 分配用户栈空间
-
-    我们通过 `mm_map` 函数来通过 `kmalloc` 申请内存并映射到指定的虚拟内存地址：
-
-    ```cpp
-    vm_flags = VM_READ | VM_WRITE | VM_STACK;
-    if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0) {
-        goto bad_cleanup_mmap;
-    }
-    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-PGSIZE , PTE_USER) != NULL);
-    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-2*PGSIZE , PTE_USER) != NULL);
-    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-3*PGSIZE , PTE_USER) != NULL);
-    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-4*PGSIZE , PTE_USER) != NULL);
-    ```
-
-  * (5) 设置当期进程的 cr3 寄存器来加载页表
-
-    ```cpp
-    mm_count_inc(mm);
-    current->mm = mm;
-    current->cr3 = PADDR(mm->pgdir);
-    lcr3(PADDR(mm->pgdir));
-    ```
-
-  * (6) 设置中断帧以保证中断的正确性，能正确地从内核态调回用户态（在 `trapentry.S` 中）
-
-    ```cpp
-    struct trapframe *tf = current->tf;
-    memset(tf, 0, sizeof(struct trapframe));
-    /* LAB5:EXERCISE1 YOUR CODE */
-    // If we set trapframe correctly, then the user level process can return to USER MODE from kernel. So
-    tf->tf_cs = USER_CS; // see memlayout.h
-    tf->tf_ds = tf->tf_es = tf->tf_ss = USER_DS;
-    tf->tf_esp = USTACKTOP; // top addr of user stack
-    tf->tf_eip = elf->e_entry; // entry point of this binary program
-    tf->tf_eflags |= FL_IF; // enable interrupts
-    ```
-
-* `do_execve` 函数执行完成，通过 `trapentry.S` 的汇编代码中的 `iret` 返回原特权级，根据第 6 步的代码跳转到新进程的代码
-
-### 代码实现
-
-#### `alloc_proc`
-
-LAB 5 要求对 `alloc_proc` 函数的内容进行补充，补充结果如下：
+根据提示，我们可以写出如下代码：
 
 ```cpp
-// alloc_proc - alloc a proc_struct and init all fields of proc_struct
-static struct proc_struct *
-alloc_proc(void) {
-    struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
-    if (proc != NULL) {
-        // LAB4:EXERCISE1 YOUR CODE
-        proc->state = PROC_UNINIT;
-        proc->pid = -1;
-        proc->runs = 0;
-        proc->kstack = 0;
-        proc->need_resched = 0;
-        proc->parent = NULL;
-        proc->mm = NULL;
-        memset(&(proc->context), 0, sizeof(struct context));
-        proc->tf = NULL;
-        proc->cr3 = boot_cr3;
-        proc->flags = 0;
-        memset(proc->name, 0, PROC_NAME_LEN);
-        // LAB5 YOUR CODE : (update LAB4 steps)
-        proc->wait_state = 0;
-        proc->cptr = proc->yptr = proc->optr = NULL;
-    }
-    return proc;
-}
+       proc->rq = NULL; // 初始化该进程所属的运行队列
+       list_init(&proc->run_link); // 初始化该进程所属队列的指针
+       proc->time_slice = 0; // 初始化当前进程的时间片为 0
+       skew_heap_init(&proc->lab6_run_pool);
+       proc->lab6_stride = 0; // 设置当前进程的
+       proc->lab6_priority = 1; // 设置当前进程的优先级为最低
 ```
 
-完成对以下 4 个变量的初始化：
+#### `trap.c:trap_dispatch`
 
-* `wait_state`：表示当前进程的等待状态，可以为 `WT_CHILD` 表示在等在子进程，`WT_INTERRUPTED` 表示当前正在等待
-* `cptr`：第一个子进程的结构体地址
-* `yptr`：当前进程的右（年轻）兄弟进程（与当前进程的父进程相同）的结构体地址
-* `optr`：当前进程的左（年长）兄弟进程（与当前进程的父进程相同）的结构体地址
-* 这三个结构体指针可以完成对进程树的遍历，方便我们对进程进行管理。
-
-#### `do_fork`
-
-LAB 5 要求对 `do_fork` 函数的内容进行补充，补充结果如下：
-
-```cpp
-/**
- * 根据父进程状态拷贝出一个状态相同的子进程。
- * 
- * @param clone_flags 标记子进程资源是共享还是拷贝，若 clone_flags & CLONE_VM，则共享，否则拷贝
- * @param stack 父进程的用户栈指针，如果为 0，表示该进程是内核线程
- * @param tf 进程的中断帧，将被拷贝给子进程，保证状态一致
- */
-int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
-    int ret = -E_NO_FREE_PROC;
-    struct proc_struct *proc;
-    if (nr_process >= MAX_PROCESS) {
-        goto fork_out;
-    }
-    ret = -E_NO_MEM;
-    //LAB4:EXERCISE2 YOUR CODE
-	//LAB5 YOUR CODE : (update LAB4 steps)
-    /* Some Functions
-     *    set_links:  set the relation links of process.  ALSO SEE: remove_links:  lean the relation links of process 
-     *    -------------------
-     *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
-     *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
-     */
-
-    //    1. call alloc_proc to allocate a proc_struct
-    // 新建 proc 结构体并初始化为空
-    if ((proc = alloc_proc()) == NULL) {
-        goto fork_out;
-    }
-    // !!! 将子进程的父亲设置为当前进程
-    proc->parent = current;
-    assert(current->wait_state == 0); // !!! 调用 fork 的进程必定在运行中
-
-    //    2. call setup_kstack to allocate a kernel stack for child process
-    // 分配页帧给子进程内核栈
-    if (setup_kstack(proc) != 0) {
-        goto bad_fork_cleanup_proc;
-    }
-    //    3. call copy_mm to dup OR share mm according clone_flag
-    // 根据 clone_flags 来共享或复制出一个新的内存管理器给子进程
-    if (copy_mm(clone_flags, proc) != 0) {
-        goto bad_fork_cleanup_kstack;
-    }
-
-    //    4. call copy_thread to setup tf & context in proc_struct
-    // 初始化进程内核栈中的 trapframe 结构体，并保存进程的内核入口和内核栈
-    copy_thread(proc, stack, tf);
-    //    5. insert proc_struct into hash_list && proc_list
-    bool intr_flag;
-    local_intr_save(intr_flag); // 关闭中断确保安全
-    {
-        proc->pid = get_pid(); // 为进程分配唯一的 pid
-        hash_proc(proc); // 将进程加入到哈希表中
-        set_links(proc); // !!! 将进程加入到进程列表中
-    }
-    local_intr_restore(intr_flag); // 恢复中断
-    //    6. call wakeup_proc to make the new child process RUNNABLE
-    wakeup_proc(proc); // 令子进程的状态为运行中：PROC_RUNNABLE
-    //    7. set ret vaule using child proc's pid
-    ret = proc->pid; // 返回子进程的 pid
-
-	
-fork_out:
-    return ret;
-
-bad_fork_cleanup_kstack:
-    put_kstack(proc);
-bad_fork_cleanup_proc:
-    kfree(proc);
-    goto fork_out;
-}
-```
-
-这个函数调用了 `set_links` 函数
-
-```cpp
-/**
- * 设置进程间的关系指针 optr、cptr、yptr
- */
-static void
-set_links(struct proc_struct *proc) {
-    // 将 proc 进程加入到进程列表中
-    list_add(&proc_list, &(proc->list_link));
-    // 当前进程是最新的，显然没有更年轻的兄弟进程
-    proc->yptr = NULL;
-    // 如果当前进程存在更年长的兄弟进程
-    if ((proc->optr = proc->parent->cptr) != NULL) {
-        // 维护指针关系，确保多叉树的正确性
-        proc->optr->yptr = proc;
-    }
-    // 父进程的最新子进程设为 proc
-    proc->parent->cptr = proc;
-    // 我们新建了一个父进程
-    nr_process ++;
-}
-```
-
-#### `idt_init`
-
-LAB 5 要求对 `idt_init` 函数的内容进行补充，补充结果如下：
-
-补充方法和 LAB1 的 Challenge 很像，我们需要添加一个用户中断 SYSCALL 给用户用来进行系统调用
-
-```cpp
-void
-idt_init(void) {
-    // LAB1 YOUR CODE : STEP 2
-    // (1) Where are the entry addrs of each Interrupt Service Routine (ISR)?
-    //     All ISR's entry addrs are stored in __vectors. where is uintptr_t __vectors[] ?
-    //     __vectors[] is in kern/trap/vector.S which is produced by tools/vector.c
-    //     (try "make" command in lab1, then you will find vector.S in kern/trap DIR)
-    //     You can use  "extern uintptr_t __vectors[];" to define this extern variable which will be used later.
-
-    // 表示各个中断处理程序的段内偏移地址
-    extern uintptr_t __vectors[]; // defined in kern/trap/vector.S
-
-    // (2) Now you should setup the entries of ISR in Interrupt Description Table (IDT).
-    //     Can you see idt[256] in this file? Yes, it's IDT! you can use SETGATE macro to setup each item of IDT
-
-    int i;
-    for (i = 0; i < 256; ++i) {
-        // 中断处理程序在内核代码段中，特权级为内核级
-        SETGATE(idt[i], GATE_INT, GD_KTEXT, __vectors[i], DPL_KERNEL);
-    }
-
-    // LAB1 CHALLENGE：跳转到内核态的特权级为用户态
-    // SETGATE(idt[T_SWITCH_TOK], GATE_INT, GD_KTEXT, __vectors[T_SWITCH_TOK], DPL_USER);
-    
-    /* LAB5 YOUR CODE */ 
-    // you should update your lab1 code (just add ONE or TWO lines of code), let user app to use syscall to get the service of ucore
-    // so you should setup the syscall interrupt gate in here
-    SETGATE(idt[T_SYSCALL], GATE_TRAP, GD_KTEXT, __vectors[T_SYSCALL], DPL_USER);
-
-    // (3) After setup the contents of IDT, you will let CPU know where is the IDT by using 'lidt' instruction.
-    //     You don't know the meaning of this instruction? just google it! and check the libs/x86.h to know more.
-    //     Notice: the argument of lidt is idt_pd. try to find it
-
-    lidt(&idt_pd);
-}
-```
-
-#### `trap_dispatch`
-
-LAB 5 要求对 `trap_dispatch` 函数的内容进行补充，补充结果如下：
-
-我们在定时中断内添加内核抢占 CPU 进行调度的代码：
+这里我们选择直接调用调度算法的时间中断处理函数来负责决定此时是否需要进行调度。
 
 ```cpp
     case IRQ_OFFSET + IRQ_TIMER:
-#if 0
-    LAB3 : If some page replacement algorithm(such as CLOCK PRA) need tick to change the priority of pages,
-    then you can add code here. 
-#endif
-        /* LAB1 YOUR CODE : STEP 3 */
-        /* handle the timer interrupt */
-        // (1) After a timer interrupt, you should record this event using a global variable (increase it), such as ticks in kern/driver/clock.c
         ++ticks;
-        // (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
-        assert(ticks <= TICK_NUM);
-        if (ticks == TICK_NUM) {
-            ticks = 0;
-            // print_ticks();
-
-            /* LAB5 YOUR CODE */
-            /* you should update you lab1 code (just add ONE or TWO lines of code):
-             *    Every TICK_NUM cycle, you should set current process's current->need_resched = 1
-             */
-            assert(current != NULL); // 无论如何当前都必存在进程，无论是 initproc、idleproc 还是其他用户进程
-            current->need_resched = 1; // 系统通过定时时钟中断来抢占 CPU 来进行调度
-        }
-        // (3) Too Simple? Yes, I think so!
+        /* LAB6 YOUR CODE */
+        assert(current != NULL);
+        sched_class_proc_tick(current);
         break;
 ```
 
-#### 设置 `trapframe` 的代码如下
+## 练习**1**：使用 Round Robin 调度算法
+
+> 完成练习 0 后，建议大家比较一下（可用 kdiff3 等文件比较软件）个人完成的 lab5 和练习 0 完成后的刚修改的 lab6 之间的区别，分析了解 lab6 采用 RR 调度算法后的执行过程。执行 make grade，大部分测试用例应该通过。但执行 priority.c 应该过不去 。
+> 请在实验报告完成下面要求：
+>
+> - 请理解并分析 sched_class 中各个函数指针的用法，并接合 Round Robin 调度算法描述 ucore 的调度执行过程
+
+### `sched_class` 各个函数的用法
+
+#### `sched_class`
 
 ```cpp
-/* LAB5:EXERCISE1 YOUR CODE */
-// If we set trapframe correctly, then the user level process can return to USER MODE from kernel. So
-tf->tf_cs = USER_CS; // see memlayout.h
-tf->tf_ds = tf->tf_es = tf->tf_ss = USER_DS;
-tf->tf_esp = USTACKTOP; // top addr of user stack
-tf->tf_eip = elf->e_entry; // entry point of this binary program
-tf->tf_eflags |= FL_IF; // enable interrupts
+struct sched_class default_sched_class = {
+    .name = "RR_scheduler",
+    .init = RR_init,
+    .enqueue = RR_enqueue,
+    .dequeue = RR_dequeue,
+    .pick_next = RR_pick_next,
+    .proc_tick = RR_proc_tick,
+};
 ```
 
-我们根据已有的提示很容易就能完成这里的代码填写。
+这个结构体描述了一个调度算法，我们可以通过更换结构体中的函数指针来实现更换调度器。每个函数的用途我会在之后的章节中介绍。
 
-### 问题回答
-
-> 描述当创建一个用户态进程并加载了应用程序后，CPU是如何让这个应用程序最终在用户态执行起来的。即这个用户态进程被ucore选择占用CPU执行（RUNNING态）到具体执行应用程序第一条指令的整个经过。
-
-1. `proc_init` 函数创建唯一的内核进程 `initproc`
-2. `initproc` 进程创建内核线程 `A`，调用 `do_wait` 等待子进程结束
-3. `do_wait` 和 `init_main` 寻找是否存在子进程会调用 `schedule` 函数开始调度
-4. 调度找到了可以执行 `initproc` 刚新建的子进程，并通过 `proc_run` 函数切换上下文到这个进程 `A`
-5. 进程 `A` 进入 `user_main` 函数，并调用 `KERNEL_EXECVE` 加载用户程序，调用 `SYS_exec` 中断进入操作系统
-6. 操作系统调用 `do_execve` 完成用户程序的加载，并设置 `trapframe` ，使得进入 `trapentry.S` 后将 `trapframe` 内容导出，使得中断跳出后进入 `trapframe` 设置好的状态，进入用户态开始执行外部用户程序代码
-7. 每 100 个 tick 调用一次时钟中断，设置当期进程为需要调度的状态。下次中断时调用 `schedule` 函数进行调度
-
-
-
-## 练习**2**：父进程复制自己的内存空间给子进程
-
->  创建子进程的函数do_fork在执行中将拷贝当前进程（即父进程）的用户内存地址空间中的合法内容到新进程中（子进程），完成内存资源的复制。具体是通过copy_range函数（位于kern/mm/pmm.c中）实现的，请补充copy_range的实现，确保能够正确执行。
-
-### `copy_range`
-
-该函数负责将父进程的指定页面复制给进程 B，实现过程是：
-
-1. 遍历进程 A 的指定地址对应的页面
-2. 如果页面所属页表不存在，则跳过这个页表
-3. 否则为进程 B 新建一个页表项
-4. 如果实现了 CopyOnWrite，则将进程 A 的页面设置为只读，并将这个页面直接送给进程 B
-5. 如果没有实现，则分配一个新页面，调用 `memcpy` 来复制页面的 4K 字节的数据，再将这个页面送给进程 B
-
-#### 代码实现
+#### `run_queue`
 
 ```cpp
 /**
- * @brief 将进程 A 中的用户内存段 [start,end) 复制给进程 B。
- * @param to 目标进程 B 的页目录表
- * @param from 源进程 A 的页目录表
- * @param start 进程 A 的待复制用户内存段起始地址，必须页对齐
- * @param end 进程 A 的待复制用户内存段结束地址，必须页对齐
- * @param share 为真时将共享页面，否则新建页面并复制内存内容。
- * @call_chain copy_mm-->dup_mmap-->copy_range
+ * 存储调度算法维护的进程队列等数据结构
  */
-int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
-    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
-    assert(USER_ACCESS(start, end));
-    // copy content by page unit.
-    do {
-        // 我们遍历 [start,end) 区间内的所有页表
-        pte_t *ptep = get_pte(from, start, 0), *nptep;
-        // 由于内存地址对应页表不存在，我们跳过整个页表段
-        if (ptep == NULL) {
-            start = ROUNDDOWN(start + PTSIZE, PTSIZE);
-            continue;
-        }
-        // 如果 start 对应的页表项存在，我们完成这个页面的复制
-        if (*ptep & PTE_P) {
-            // 获取进程 B 中对应虚拟地址页面
-            if ((nptep = get_pte(to, start, 1)) == NULL) {
-                return -E_NO_MEM;
-            }
-            uint32_t perm = (*ptep & PTE_USER);
-            // 获取 start 所属页面的结构体
-            struct Page *page = pte2page(*ptep);
-            struct Page *npage;
-            assert(page != NULL);
-            int ret = 0;
-            // LAB5: EXERCISE2 YOUR CODE
-            if (share) {
-                if (perm & PTE_W) {
-                    // 设置页面为不可读写的，更新页表并刷新 TLB
-                    ret = page_insert(from, page, start, perm &= ~PTE_W);
-                    assert(ret == 0);
-                }
-                npage = page;
-            } else {
-                // 为进程 B 分配页面
-                npage = alloc_page();
-                assert(npage != NULL);
-                // replicate content of page to npage, build the map of phy addr of nage with the linear addr start
-                // (1) find src_kvaddr: the kernel virtual address of page
-                void *src_kvaddr = page2kva(page);
-                // (2) find dst_kvaddr: the kernel virtual address of npage
-                void *dst_kvaddr = page2kva(npage);
-                // (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
-                memcpy(dst_kvaddr, src_kvaddr, PGSIZE); 
-            }
-            // (4) build the map of phy addr of  nage with the linear addr start
-            ret = page_insert(to, npage, start, perm);
-            // 我们已经通过 nptep 检查了 get_pte 的合法性，因此 page_insert 必正常结束
-            assert(ret == 0);
-        }
-        start += PGSIZE;
-    } while (start != 0 && start < end);
-    return 0;
-}
+struct run_queue {
+    list_entry_t run_list; // 调度队列的头指针
+    unsigned int proc_num; // 在调度队列中的进程数
+    int max_time_slice; // 队列的最大时间片，进程重新获得时间片的时间为该项值
+    // For LAB6 ONLY
+    skew_heap_entry_t *lab6_run_pool; // 对于 Stride Scheduling 算法，该项为左偏树的根节点
+};
 ```
 
-### Copy On Write
-
->  请在实验报告中简要说明如何设计实现 ”Copy on Write 机制“，给出概要设计，鼓励给出详细设计。
-
-1. fork 之后，我们在 `copy_range` 函数中进行页面复制时，不执行复制，而是共享只读页面。即将父进程的页面设置为不可读，并将这个页面直接插入到子进程的页表中，这样就节省了一次复制的时间
-2. 由于页面已经被设置为只读，因此对这些页面进行读写时会产生页访问异常，此时我们可以判断页面是否存在，如果页面存在，且 VMA 中记录页面可写，则一定是 CopyOnWrite 产生的只读页面。此时我们需要复制新的页面（或直接使用原页面，如果这个页面的引用数为 1）。由于创建了新页面，原页面的引用数就减一。将新的页面替换原页表中的页面。
+#### `RR_init`
 
 ```cpp
-/*LAB3 EXERCISE 1: YOUR CODE*/
-// (1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
-if (!(ptep = get_pte(mm->pgdir, addr, true))) {
-    cprintf("do_pgfault failed: no enough space for allocating a page for page table in get_pte");
-    goto failed;
+/**
+ * 初始化 Round Rubin 调度算法
+ */
+static void RR_init(struct run_queue *rq) {
+    list_init(&(rq->run_list));
+    rq->proc_num = 0;
 }
-if (!*ptep) {
-    // (2) if the phy addr isn't exist (No page table entry exists),
-    // then alloc a page & map the phy addr with logical addr
-    if (!pgdir_alloc_page(mm->pgdir, addr, perm)) {
-        cprintf("do_pgfault failed: no enough space for allocating a page for user");
-        goto failed;
+```
+
+#### `RR_enqueue`
+
+```cpp
+/**
+ * 将进程加入到调度队列中等待下一次调度。
+ * 遇到以下两种情况会将进程进入调度队列并（唤醒进程或让出 CPU）
+ * 如果当前进程被唤醒（比如拿到了等待的资源，不需要继续等待了，通过 `wake_up` 函数调用；
+ * 如果当前进程时间片已到，需要再次调度时
+ */
+static void
+RR_enqueue(struct run_queue *rq, struct proc_struct *proc) {
+    assert(list_empty(&(proc->run_link)));
+    // 将进程加入到调度队列中
+    list_add_before(&(rq->run_list), &(proc->run_link));
+    // 如果进程的时间片已到，那么重置该进程的时间片
+    if (proc->time_slice == 0 || proc->time_slice > rq->max_time_slice) {
+        proc->time_slice = rq->max_time_slice;
+    }
+    proc->rq = rq; // proc 进程
+    rq->proc_num ++; // 待调度的进程数 + 1
+}
+```
+
+#### `RR_dequeue`
+
+```cpp
+/**
+ * 将进程从调度队列中删除。
+ * 调用此函数后一般会调用 `proc_run` 让进程抢占 CPU。
+ */
+static void RR_dequeue(struct run_queue *rq, struct proc_struct *proc) {
+    assert(!list_empty(&(proc->run_link)) && proc->rq == rq);
+    list_del_init(&(proc->run_link)); // 从调度队列中删除
+    rq->proc_num --; // 待调度的进程数 - 1
+}
+```
+
+#### `RR_pick_next`
+
+```cpp
+/**
+ * 选择一个进程抢占 CPU
+ * Round Rubin 算法选择最先失去 CPU 执行权限的进程调度
+ */
+static struct proc_struct *RR_pick_next(struct run_queue *rq) {
+    // 从队列头取出一个进程
+    // 由于时间片到期的进程被加入队尾，
+    // 因此队列头是最长尚未获得执行权的进程，给予这个进程执行权
+    list_entry_t *le = list_next(&(rq->run_list));
+    if (le != &(rq->run_list)) {
+        return le2proc(le, run_link);
+    }
+    return NULL;
+}
+```
+
+#### `RR_proc_tick`
+
+```cpp
+/**
+ * 时间中断调度处理函数
+ * 每次时间中断后维护当前进程的时间片，
+ * 如果时间片到期了，执行调度
+ */
+static void
+RR_proc_tick(struct run_queue *rq, struct proc_struct *proc) {
+    if (proc->time_slice > 0) {
+        proc->time_slice --;
+    }
+    if (proc->time_slice == 0) {
+        // 将当前进程的 need_reschedule 设为 true
+        // 这样 trap 函数最后就会调用 schedule 函数以执行调度
+        proc->need_resched = 1;
     }
 }
-else {
-    struct Page *page = NULL;
-    /*
-         * LAB5 CHALLENGE (the implmentation Copy on Write)
-         */
-    if (*ptep & PTE_P) {
-        // 如果我们写入一个已经在内存中的页面而导致缺页异常，
-        // 一定是用户程序没有该页的写入权限（页面写保护/只读），
-        // 页面只读是因为我们采取了页面共享的策略以减少内存占用，
-        // 因此我们需要实现 copy-on-write 算法来保证用户仍能
-        // 对这些页面进行写入操作。
-        // 若查询 VMA 已知该页面是真的可写的，我们创建一个新的
-        // 页面，并修改 *ptep
-        if (vma->vm_flags & VM_WRITE) {
-            struct Page *opage = pte2page(*ptep);
-            if (page_ref(opage) == 1) {
-                cprintf("do_pgfault: COW");
-                // 如果我们写入的页面引用数刚好为 1，
-                // 那么当前页面就可以直接设置为可写
-                page = opage;
-            } else if (page_ref(opage) > 1) {
-                // 否则复制出来一个新页面
-                cprintf("do_pgfault: COW: allocating a new page");
-                page_ref_dec(opage);
-                if ((page = alloc_page()) == NULL) {
-                    cprintf("do_pgfault failed: no enough space for allocating a page for user");
-                    goto failed;
-                }
-                void *src_kvaddr = page2kva(opage);
-                void *dst_kvaddr = page2kva(page);
-                memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
-            } else {
-                panic("error writing to a non-ref page");
-            }
-        } else {
-            panic("error writing to a non-writable page");
-        }
-    } else {
-        // 若页面不存在，表明该页被交换进磁盘了，我们需要执行页交换操作
-        /*
-            * LAB3 EXERCISE 2: YOUR CODE
-            * Now we think this pte is a swap entry, we should load data from disk to a page with physical address,
-            * and map the phy addr with logical addr, trigger swap manager to record the access situation of this page.
-            */
-        if (swap_init_ok) {
-            if (swap_in(mm, addr, &page) != 0) {        // (1) According to the mm AND addr, try to load the content of right disk page
-                cprintf("do_pgfault failed: swap_in");  //     into the memory which page managed.
-                goto failed;
-            }
-        }
-        else {
-            cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
-            goto failed;
-        }
-    }
-    page_insert(mm->pgdir, page, addr, perm);   // (2) According to the mm, addr AND page, setup the map of phy addr <---> logical addr
-    swap_map_swappable(mm, addr, page, true);   // (3) make the page swappable.
-    page->pra_vaddr = addr;
+```
+
+### Round Robin 调度算法执行过程
+
+Round Robin 算法认为一个时间片到期的进程需要让出 CPU 并重新调度，因此：
+
+1. 算法在每个时钟周期通过 `RR_proc_tick` 维护进程的时间片（减 1）
+2. 检查当前执行进程的时间片是否用完，如果用完则标记为需要被调度（`current->need_resched = 1`）
+3. ucore 会在用户态跳转到内核态的一级中断结束前（调度算法已经维护过时间片并且知道了当前进程是否需要进行调度），检查是否需要调度并进行调度
+4. 调度时将当前被调走的进程通过 `RR_enqueue` 加入到调度队列中，若该进程时间片用完，则恢复其时间片
+5. 调度器通过 `RR_pick_next` 挑选下一个获得 CPU 时间的进程，并通过 `RR_dequeue` 将其取出
+6. 如果未能找到一个可以执行的用户进程（所有的进程都不是就绪的，比如在等待资源），那么选择 `idle` 进程执行，这个进程将不断检查是否存在可以调度的进程
+7. 调用 `proc_run` 切换进程
+
+### 多级反馈队列调度算法
+
+
+
+## 练习2：实现 Stride Scheduling 调度算法
+
+> 首先需要换掉 RR 调度器的实现，即用 default_sched_stride_c 覆盖default_sched.c。然后根据此文件和后续文档对 Stride 调度器的相关描述，完成 Stride 调度算法的实现。
+
+### 算法思路
+
+该算法为每一个进程定义了优先级 `priority` 表示其优先级，`stride` 值表示这个进程的优先程度（是优先级倒数的累加和）。
+
+### 算法实现
+
+#### `stride_init`
+
+```cpp
+/**
+ * @brief 初始化运行队列 rq
+ */
+static void
+stride_init(struct run_queue *rq) {
+     /* LAB6: YOUR CODE */
+     // (1) init the ready process list: rq->run_list: should be a empty list after initialization.
+     list_init(&rq->run_list);
+     // (2) init the run pool: rq->lab6_run_pool: NULL
+     rq->lab6_run_pool = NULL;
+     // (3) set number of process: rq->proc_num to 0
+     rq->proc_num = 0;
+     // max_time_slice: no need here, the variable would be assigned by the caller.
+}
+```
+
+#### `stride_enqueue`
+
+```cpp
+/**
+ * @brief 将 proc 插入到运行队列 rq 中。
+ * 本函数将会检查/初始化 proc 的相关成员，并且将 lab6_run_pool 插入到队列中
+ * （我们使用左偏树来存储）。本函数还会更新 rq 的 meta date。
+ */
+static void
+stride_enqueue(struct run_queue *rq, struct proc_struct *proc) {
+     /* LAB6: YOUR CODE */
+     // (1) 将 proc 插入到调度队列中，一种方法是使用队列维护
+     // list_add_before(&rq->run_list, &proc->run_link);
+     // 另一种方法是使用左偏树来进行维护
+     rq->lab6_run_pool = skew_heap_insert(rq->lab6_run_pool, &proc->lab6_run_pool, proc_stride_comp_f);
+
+     // (2) 重新计算进程的时间片
+     if (proc->time_slice <= 0 || proc->time_slice > rq->max_time_slice)
+          proc->time_slice = rq->max_time_slice;
+     // (3) 将当前进程的调度队列 rq 设为当前的 rq
+     proc->rq = rq;
+     // (4) 当前的调度队列 rq 维护的待调度进程数 + 1
+     ++rq->proc_num;
+}
+```
+
+#### `stride_dequeue`
+
+```cpp
+/**
+ * @brief 从运行队列 rq 中删除进程 proc。
+ */
+static void
+stride_dequeue(struct run_queue *rq, struct proc_struct *proc) {
+     /* LAB6: YOUR CODE */
+     // (1) 将进程从调度队列中删除
+     // list_del_init(&proc->run_link);
+     rq->lab6_run_pool = skew_heap_remove(rq->lab6_run_pool, &proc->lab6_run_pool, proc_stride_comp_f);
+     // (2) 标记进程不从属于任意一个调度队列
+     proc->rq = NULL;
+     // (3) 当前的调度队列 rq 维护的待调度进程数 - 1
+     --rq->proc_num;
+}
+```
+
+#### `stride_proc_tick`
+
+```cpp
+/**
+ * @brief 该函数在时钟中断时触发，更新当前进程的状态。
+ * 该函数会更新当前进程的时间片，如果时间片耗尽，那么该进程就需要被调度。
+ */
+static void
+stride_proc_tick(struct run_queue *rq, struct proc_struct *proc) {
+     /* LAB6: YOUR CODE */
+     if (--proc->time_slice <= 0) { // 如果时间片耗尽
+          proc->time_slice = 0;
+          proc->need_resched = true; // 标记当前进程需要被调度
+     }
 }
 ```
 
 
 
-## 练习**3**：分析代码: fork/exec/wait/exit 函数，以及系统调用的实现
+## 练习3：阅读分析源代码
 
-> 请在实验报告中简要说明你对 fork/exec/wait/exit  函数的分析。并回答如下问题
+> 结合中断处理和调度程序，再次理解进程控制块中的 trapframe 和 context 在进程切换时作用。
 
-### 问题回答
+ucore 实现进程调度的时机是陷入操作系统时完成，具体的调用顺序是：
 
-> 请分析fork/exec/wait/exit在实现中是如何影响进程的执行状态的？
+### 陷入内核
 
-1. fork
+用户程序通过 `int 0x80` 调用系统调用时、或者是发生时钟中断而强制陷入操作系统时，或者其他原因而发生中断，CPU 根据 `trap.c` 中的 `idt_init` 设置的 IDT，跳转到 `vectors.S` 中：
 
-   通过 `SYS_fork` 系统调用，调用 `do_fork` 函数实现，分配内存空间、设置 `trapframe`，并通过 `wakeup_proc` 将进程状态设置为 RUNNABLE 使进程可以被调度 。
+```asm
+vectorX:
+	pushl $0
+	pushl $X
+	jmp __alltraps
+```
 
-2. exec
+#### `trapentry.S:__alltraps`
 
-   通过 `SYS_exec` 系统调用，调用 `do_execve` 函数实现。该函数释放当前进程的内存，并调用 `load_icode` 为新程序分配空间、设置 `trapframe`。中断结束后就进入新程序代码执行了。
+代码随即跳转到 `trapentry.S:__alltraps` 中，保存中断调用前的上下文，并进入操作系统的中断处理程序。
 
-3. wait
+```asm
+# CPU 会先检查特权级是否变化，如果变化，就需要操作 TSS
+# 将新特权级相关的 ss 和 esp 值装载到 ss 和 esp 寄存器，在新的栈中保存 ss 和 esp 以前的值（由 iret 指令中恢复）
+# 在栈中保存 eflags、cs、eip 的内容
+# 装载 cs 和 eip 寄存器（从 IDT 中读出的，跳转到中断处理程序
+# vectors.S sends all traps here.
+.text
+.globl __alltraps
+__alltraps:
+    # 以下代码在内核栈中构建 trapframe，trapframe 需要寄存器的数据
+    # 因此通过 pushl 和 pushal 来构建 trapframe 的数据
+    # trapframe 还包含由 CPU 装载进内核栈中的数据 ss、esp 等内容
+    pushl %ds # trapframe.__dsh & ds
+    pushl %es # trapframe.__esh & es
+    pushl %fs # trapframe.__fsh & fs
+    pushl %gs # trapframe.__gsh & gs
+    pushal    # trapframe.tf_regs, pushl %esp 指向这里，也就是 tf 指向这里
+    # trapframe 到此结束
 
-   通过 `SYS_wait` 系统调用，调用 `do_wait` 函数实现。首先检查需要等待的进程，如果是等待子进程则寻找是否以及存在结束（ZOMBIE）的子进程，如果存在释放这个子进程的资源并返回；否则启动调度切换到别的进程执行。
+    # 设置数据段为内核数据段
+    movl $GD_KDATA, %eax
+    movw %ax, %ds
+    movw %ax, %es
 
-4. exit
+    # 此时 esp 指向栈顶，也就是 trapframe 的地址
+    # 将 esp 压栈，为 trap 函数的参数，
+    pushl %esp     # tf - 1 指向这里
 
-   通过 `SYS_exit` 系统调用，调用 `do_exit` 函数实现。
+    # 调用 trap(tf), 其中 tf=%esp
+    call trap
+```
 
+由于要跳转进内核调用 `trap` 函数，因此我们必须首先保存用户进程的执行状态，以保证回到用户态时可以恢复用户进程状态，或者切换时把用户进程的执行状态从 trapframe 中加载出来。
 
+#### `trap.c:trap(tf)`
 
-> 请给出ucore中一个用户态进程的执行状态生命周期图（包执行状态，执行状态之间的变换关系，以及产生变换的事件或函数调用）。（字符方式画即可）
+调用了 `call trap` 后，我们进入 `trap` 函数。这个函数首先检查是否存在进程，如果不存在则直接进入中断处理程序。否则将汇编代码取出的 trapframe 保存到当前进程的状态中，并进入中断处理程序。
 
-![1559491005110](E:\sources\homework\ucore_os_lab\labcodes\lab5\assets\1559491005110.png)
+```cpp
+void
+trap(struct trapframe *tf) {
+    // dispatch based on what type of trap occurred
+    // used for previous projects
+    if (current == NULL) {
+        trap_dispatch(tf);
+    }
+    else {
+        // keep a trapframe chain in stack
+        struct trapframe *otf = current->tf;
+        current->tf = tf;
+    
+        bool in_kernel = trap_in_kernel(tf);
+    
+        trap_dispatch(tf);
+    
+        current->tf = otf;
+        // 由于可能在系统调用或发生其他中断从
+        // 用户态进入内核态后再次发生中断，
+        // 因此我们需要检查当前状态是不是不是二级中断
+        if (!in_kernel) {
+            if (current->flags & PF_EXITING) {
+                do_exit(-E_KILLED);
+            }
+            if (current->need_resched) {
+                schedule();
+            }
+        }
+    }
+}
+```
+
+#### `trap.c:trap_dispatch(tf)`
+
+进入了中断处理程序，由于我们可能因为时钟中断进入操作系统，我们此时通知调度器现在可以根据时钟中断来决定是否需要进行调度：通过调用 `sched_class_proc_tick` 来实现。
+
+```cpp
+static void
+trap_dispatch(struct trapframe *tf) {
+    // ...
+    switch (tf->tf_trapno) {
+    // other cases ...
+    case IRQ_OFFSET + IRQ_TIMER:
+        ++ticks;
+        /* LAB6 YOUR CODE */
+        assert(current != NULL);
+        sched_class_proc_tick(current);
+        break;
+    }
+    // ...
+}
+```
+
+#### `sched.c:schedule()`
+
+已经将该函数的解释写到代码注释中了：
+
+```cpp
+/**
+ * 调度程序，选择一个可以运行的进程抢占 CPU
+ */
+void schedule(void) {
+    bool intr_flag;
+    struct proc_struct *next;
+    // 调度时中断敏感，我们需要先关中断
+    local_intr_save(intr_flag);
+    {
+        current->need_resched = 0;
+
+        // 如果当前的进程还是可执行的，我们将该进程
+        // 标记为待调度的状态
+        if (current->state == PROC_RUNNABLE) {
+            sched_class_enqueue(current);
+        }
+
+        // 选择一个进程抢占 CPU
+        if ((next = sched_class_pick_next()) != NULL) {
+            sched_class_dequeue(next);
+        }
+
+        // 如果不存在可以调度的进程，这说明当前没有进程
+        // 可以运行，则执行 idle 进程不断尝试进行调度
+        if (next == NULL) {
+            next = idleproc;
+        }
+        next->runs ++;
+        // 切换上下文给该进程
+        if (next != current) {
+            proc_run(next);
+        }
+    }
+    local_intr_restore(intr_flag);
+}
+```
+
+#### `proc.c:proc_run(struct proc_struct *)`
+
+该函数加载进程的栈指针到 TSS 段中，让 CPU 在调用 `iret` 指令从 TSS 段恢复指针时跳转到该进程的内核栈；然后加载该进程的页表以确保内存访问有效；最后调用 `switch_to` 函数切换上下文。调用完 `switch_to` 之后，会跳转到新进程的 `proc_run` 继续执行，并恢复中断。
+
+```cpp
+/**
+ * 使 proc 进程抢占 CPU。
+ */
+void proc_run(struct proc_struct *proc) {
+    if (proc != current) {
+        bool intr_flag;
+        struct proc_struct *prev = current, *next = proc;
+        // 调度代码是关键代码，关闭中断以保证数据安全
+        local_intr_save(intr_flag);
+        {
+            current = proc; // 切换到新进程
+            // 修改处理器唯一的 TSS 段，以保证发生中断时能正确恢复
+            // 堆栈指针寄存器指向这个进程内核栈空间的最高地址
+            load_esp0(next->kstack + KSTACKSIZE);
+            lcr3(next->cr3); // 加载该进程的页表
+            // 切换进程的上下文，保证寄存器正确
+            switch_to(&(prev->context), &(next->context));
+        }
+        local_intr_restore(intr_flag); // 恢复中断
+    }
+}
+```
+
+#### `switch.S`
+
+`switch_to` 所保存的上下文 `context` 和 `trapframe` 的意义不同。`trapframe` 保存的上下文用来进行中断的恢复，也就是从内核态跳转到用户态使用的，此时恢复用户进程的上下文（也就是说，`trapframe` 保存的上下文在进程调度时是指用户进程用户态代码的上下文）；而 `context` 保存的是内核执行状态的上下文，通过 `switch_to` 函数，我们可以从当前用户进程的内核态代码跳转到另一个用户进程的内核态执行状态继续执行，之后再通过 ，因此 `switch_to` 函数执行完成之后会跳转到另一个进程的 `proc_run`（已存在的进程）或者是 `forkret`（新进程）。
+
+```asm
+.text
+.globl switch_to
+switch_to:                      # switch_to(from, to)
+
+    # 保存当前进程的寄存器值到 (struct context) from 中
+    movl 4(%esp), %eax          # %eax 寄存器指向 from 进程的上下文结构体
+    popl 0(%eax)                # 将返回地址（由 call 压栈）保存到 form 进程中，这里的返回地址指 proc_run
+    movl %esp, 4(%eax)          # 保存 form 进程的 esp 寄存器到上下文中
+    movl %ebx, 8(%eax)          # 保存 form 进程的 ebx 寄存器到上下文中
+    movl %ecx, 12(%eax)         # 保存 form 进程的 ecx 寄存器到上下文中
+    movl %edx, 16(%eax)         # 保存 form 进程的 edx 寄存器到上下文中
+    movl %esi, 20(%eax)         # 保存 form 进程的 esi 寄存器到上下文中
+    movl %edi, 24(%eax)         # 保存 form 进程的 edi 寄存器到上下文中
+    movl %ebp, 28(%eax)         # 保存 form 进程的 ebp 寄存器到上下文中
+
+    # 恢复 to 进程的寄存器值
+    movl 4(%esp), %eax          # not 8(%esp): popped return address already
+                                # eax now points to to
+    movl 28(%eax), %ebp         # 从上下文中恢复 to 进程的 ebp 寄存器
+    movl 24(%eax), %edi         # 从上下文中恢复 to 进程的 edi 寄存器
+    movl 20(%eax), %esi         # 从上下文中恢复 to 进程的 esi 寄存器
+    movl 16(%eax), %edx         # 从上下文中恢复 to 进程的 edx 寄存器
+    movl 12(%eax), %ecx         # 从上下文中恢复 to 进程的 ecx 寄存器
+    movl 8(%eax), %ebx          # 从上下文中恢复 to 进程的 ebx 寄存器
+    movl 4(%eax), %esp          # 从上下文中恢复 to 进程的 esp 寄存器
+
+    pushl 0(%eax)               # 取出 to 进程的返回地址
+
+    ret # 如果 to 进程是新进程，则跳转到 forkret 函数，否则跳转到 proc_run 函数继续执行
+
+```
+
+#### `trapentry.S:forkrets`
+
+对于新进程，调用 `ret` 命令后因为 `copy_thread` 中设置 `eip` 为 `forkret` 的缘故，直接跳转到 `forkrets` 汇编（这是因为新进程还未执行过，内核栈为空，不存在内核态的上下文，因此不会通过 `switch_to` 来切换内核态上下文，直接通过中断恢复设置好的 `trapframe` 开始执行用户代码即可）：
+
+```asm
+.globl forkrets
+forkrets:
+    # set stack to this new process's trapframe
+    movl 4(%esp), %esp
+    jmp __trapret
+```
+
+对于旧进程，由于旧进程被调度时也必定是通过中断实现，因此切换上下文到这个旧进程时就会跳转到旧进程的 `proc_run` 的执行状态，并最终沿着调用链：从 `schedule`、`trap` 一路返回到 `trapentry.S:__trapret` 结束中断处理。
+
+#### `trapentry.S:__trapret`
+
+不管是新进程，还是旧进程，在获得执行时间片后都会回到本汇编函数，恢复中断前的保存在 `trapframe`  中的用户代码执行状态上下文，并通过 `iret` 跳转到用户态执行用户代码，至此进程切换完成。
+
+```asm
+.globl __trapret
+__trapret:
+    # 将寄存器从 tf 中恢复出来（tf 可能会被 trap 函数修改）
+    popal
+
+    # 恢复段寄存器值
+    popl %gs
+    popl %fs
+    popl %es
+    popl %ds
+
+    # 弹出中断服务程序 (vectors.S) 压入的错误码和中断编号
+    addl $0x8, %esp
+    
+    # 中断返回，CPU 恢复现场
+    # CPU 弹出压入的 %eip、%cs（32 位）、%eflags
+    # 检查 cs 的最低两位的值（DPL），如果不相等，则继续
+    # 从栈中装载 ss 和 esp 寄存器，恢复到旧特权级的栈
+    # 检查 ds、es、fs、gs 的特权级，如果特权级比 cs 的特权级要高，则清除这些寄存器的值
+    # https://c9x.me/x86/html/file_module_x86_id_145.html
+    iret
+```
+
+## 实验分析
+
+由于 Stride Scheduling 算法没有答案可以参考，因此我的实现无法和参考答案进行比较分析。
 
 ## 实验心得
 
+### 知识点
+
 通过本次学习：
 
-1. 我了解了进程的生命周期，知道了操作系统如何通过调度完成进程的生命周期的变换；
-2. 我了解了操作系统是如何启动一个用户程序的：通过创建子进程 + `do_execve` 来实现；
-3. 知道了 `execve` 实现跳转的复杂步骤；
-4. 知道了如何通过设置 `trapframe` 来跳转到新的用户程序；
-5. 知道了 `wait` 函数是如何导致系统调度的。
+1. 我了解了缺省的 Round-Robin 调度算法的实现；
+2. 我了解了 Stride Scheduling 调度算法的链式实现和斜堆实现；
+3. 我了解了 context 和 trapframe 的区别，知道了要同时保存用户态和内核态的上下文；
+4. 我了解了如何才能切换到另外一个进程（对于新进程，由于不存在内核栈，直接通过 iret 返回到用户态；对于旧进程，返回到内核态的执行状态并继续完成中断处理）。
 
-我的代码与答案的区别在于部分实现了 CopyOnWrite 的功能，但是这部分功能仍然不能很好地工作，所以只能放弃。
+### 与理论课的差异
+
+理论课没有讨论 Stride Scheduling 算法。
+
+### 实验中没有对应上的知识点
+
+本实验中没有要求我们实现多级反馈队列的调度算法。
+
+### 心得体会
 
 同时我通过阅读 ucore 源代码，再次认识到了操作系统设计的复杂性：C 语言代码为了和汇编程序代码进行配合，代码写出来会很难懂：设置好了一些变量的值，自动跳转回到汇编代码予以应用，再通过 `iret` 指令跳转到别的地方去。`iret` 指令十分强大，实现了丰富的跳转语义。
+
+我还知道了切换进程时用户态的状态和内核态的状态都需要保存，进程调度的过程混杂了很多汇编代码，跳跃性很大，理解难度也很大，但是经过仔细分析画图还是能够分析出来的。同时我也可以借助 GDB 来了解操作系统的执行过程。
