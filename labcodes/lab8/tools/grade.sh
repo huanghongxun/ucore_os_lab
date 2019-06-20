@@ -218,6 +218,9 @@ check_regexps() {
         elif [ "x$i" = "x-" ]; then
             reg=1
         else
+            if [ $VERBOSE_QEMU ]; then
+                cat $qemu_out
+            fi
             if [ $reg -ne 0 ]; then
                 $grep '-E' "^$i\$" $qemu_out > /dev/null
             else

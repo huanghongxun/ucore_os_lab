@@ -367,6 +367,7 @@ TOUCH_FILES		:= kern/process/proc.c
 MAKEOPTS		:= --quiet --no-print-directory
 
 grade:
+	@echo "You can add variable VERBOSE_QEMU to view qemu output"
 	$(V)$(MAKE) $(MAKEOPTS) clean
 	$(V)$(SH) tools/grade.sh
 
