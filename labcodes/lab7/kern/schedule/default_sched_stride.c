@@ -8,7 +8,7 @@
 
 /* You should define the BigStride constant here*/
 /* LAB6: YOUR CODE */
-#define BIG_STRIDE (1<<10)   /* you should give a value, and is ??? */
+#define BIG_STRIDE (1<<30)   /* you should give a value, and is ??? */
 
 /* The compare function for two skew_heap_node_t's and the
  * corresponding procs*/

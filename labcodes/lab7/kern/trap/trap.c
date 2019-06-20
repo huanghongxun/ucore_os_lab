@@ -17,6 +17,7 @@
 #include <sched.h>
 #include <sync.h>
 #include <proc.h>
+#include <string.h>
 
 #define TICK_NUM 100
 
@@ -235,14 +236,7 @@ trap_dispatch(struct trapframe *tf) {
         break;
     case IRQ_OFFSET + IRQ_TIMER:
         ++ticks;
-        /* LAB6 YOUR CODE */
-        assert(current != NULL);
-        sched_class_proc_tick(current);        
-        /* LAB7 YOUR CODE */
-        /* you should upate you lab6 code
-         * IMPORTANT FUNCTIONS:
-	     * run_timer_list
-         */
+        run_timer_list();
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
