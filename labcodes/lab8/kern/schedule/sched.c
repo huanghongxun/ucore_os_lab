@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <default_sched_rr.h>
 #include <default_sched_stride.h>
+#include <default_sched_mlfq.h>
 
 // the list of timer
 static list_entry_t timer_list;
@@ -50,7 +51,7 @@ void
 sched_init(void) {
     list_init(&timer_list);
 
-    sched_class = &stride_sched_class;
+    sched_class = &mlfq_sched_class;
 
     rq = &__rq;
     rq->max_time_slice = MAX_TIME_SLICE;
@@ -109,6 +110,7 @@ void schedule(void) {
         // 可以运行，则执行 idle 进程不断尝试进行调度
         if (next == NULL) {
             next = idleproc;
+            cprintf("idleproc\n");
         }
         next->runs ++;
         // 切换上下文给该进程

@@ -94,7 +94,9 @@ sfs_rbuf(struct sfs_fs *sfs, void *buf, size_t len, uint32_t blkno, off_t offset
     return ret;
 }
 
-/* sfs_wbuf - The Basic block-level I/O routine for  Wr( non-block & non-aligned io) one disk block(using sfs->sfs_buffer)
+/**
+ * @brief 基础的块级 IO 写操作（支持不足块大小/不对齐的 IO 操作）
+ * sfs_wbuf - The Basic block-level I/O routine for  Wr( non-block & non-aligned io) one disk block(using sfs->sfs_buffer)
  *            with lock protect for mutex process on Rd/Wr disk block
  * @sfs:    sfs_fs which will be process
  * @buf:    the buffer uesed for Wr
