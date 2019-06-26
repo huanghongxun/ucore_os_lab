@@ -15,6 +15,7 @@
 #include <fs.h>
 #include <vfs.h>
 #include <sysfile.h>
+#include <swap.h>
 
 /* ------------- process/thread mechanism design&implementation -------------
 (an simplified Linux process/thread mechanism )
@@ -144,6 +145,7 @@ alloc_proc(void) {
         proc->lab6_priority = 1; // 设置当前进程的优先级为最低
         //LAB8:EXERCISE2 YOUR CODE HINT:need add some code to init fs in proc_struct, ...
         proc->filesp = NULL;
+        proc->page_fault = 0;
     }
     return proc;
 }
@@ -722,10 +724,6 @@ load_icode(int fd, int argc, char **kargv) {
     if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0) {
         goto bad_cleanup_mmap;
     }
-    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-PGSIZE , PTE_USER) != NULL);
-    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-2*PGSIZE , PTE_USER) != NULL);
-    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-3*PGSIZE , PTE_USER) != NULL);
-    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-4*PGSIZE , PTE_USER) != NULL);
     
     // (5) setup current process's mm, cr3, reset pgidr (using lcr3 MARCO)
     mm_count_inc(mm);

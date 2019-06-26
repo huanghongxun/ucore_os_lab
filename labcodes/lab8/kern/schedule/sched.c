@@ -110,7 +110,6 @@ void schedule(void) {
         // 可以运行，则执行 idle 进程不断尝试进行调度
         if (next == NULL) {
             next = idleproc;
-            cprintf("idleproc\n");
         }
         next->runs ++;
         // 切换上下文给该进程

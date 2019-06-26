@@ -237,6 +237,13 @@ trap_dispatch(struct trapframe *tf) {
         break;
     case IRQ_OFFSET + IRQ_TIMER:
         ++ticks;
+        // for swap clock algorithm
+        if (ticks % 1000 == 0) {
+            for (list_entry_t *le = list_next(&proc_list); le != &proc_list; le = list_next(le)) {
+                struct proc_struct *proc = le2proc(le, list_link);
+                proc->page_fault = 0;
+            }
+        }
         run_timer_list();
         break;
     case IRQ_OFFSET + IRQ_COM1:

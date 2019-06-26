@@ -487,6 +487,7 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
                     cprintf("do_pgfault failed: swap_in");  //     into the memory which page managed.
                     goto failed;
                 }
+                current->page_fault++;
             }
             else {
                 cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
